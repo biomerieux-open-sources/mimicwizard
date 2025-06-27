@@ -1,0 +1,6 @@
+Package: MIMICWizard
+Title: MIMIC Database Explorer
+Version: 0.7.1
+Description: This app is used to explore the MIMIC Database in a user friendly way. Allowing non-data-scientists users to extract and visualize information
+License: GPLv3
+Encoding: UTF-8

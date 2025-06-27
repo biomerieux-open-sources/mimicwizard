@@ -1,0 +1,8 @@
+.Rproj.user
+cache/*
+core.*
+.Rhistory
+.Rbuildignore
+.RData
+app.Rproj
+.Rprofile
