@@ -3,7 +3,6 @@
 **MIMICWizard** is a Shiny application designed to help users navigate the [MIMIC-IV](https://physionet.org/content/mimiciv/) database — a freely accessible, de-identified electronic health record (EHR) dataset hosted on PhysioNet.
 It provides an intuitive interface for exploring clinical data, especially for medical practitioners and researchers without extensive data science expertise.
 
----
 
 ## 🧭 Introduction
 
@@ -16,7 +15,6 @@ MIMICWizard offers :
 
 Originally developed for clinicians, MIMICWizard supports hypothesis generation and data exploration in a hospital context.
 
----
 
 ## 🚀 Features
 
@@ -27,7 +25,6 @@ Originally developed for clinicians, MIMICWizard supports hypothesis generation 
 - Demo mode with a lightweight dataset.
 - Open-source and community-driven.
 
----
 
 ## 🛠 Installation and usage
 
@@ -37,12 +34,12 @@ MIMICWizard is based on R Shiny and interact with a PostgreSQL data
 
 For detailed setup instructions and usage, refer to [the full documentation available here](https://mimicwizard.readthedocs.io/en/latest/).
 
----
-
 ## 📦 Changelog
 
 **v0.7.1** (2025-06-27) Bugfixes and optimization
+
 **v0.7.0** (2025-06-20) Public release associated with online demo version
+
 **v0.6.4** (2025-03-13) First closed full version beta-testing
 
 
@@ -55,7 +52,6 @@ This application was developed by the **Laboratoire Commun de Recherche - HCL-bi
 
 > 📝 This is not an official product of bioMérieux or Hospices Civils de Lyon. The software is provided "as is" without warranty.
 
----
 
 ## 📜 License and citation
 
