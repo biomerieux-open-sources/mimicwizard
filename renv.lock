@@ -288,6 +288,27 @@
       ],
       "Hash": "96abeed416a286d4a0f52e550b612343"
     },
+    "broom": {
+      "Package": "broom",
+      "Version": "1.0.8",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "backports",
+        "cli",
+        "dplyr",
+        "generics",
+        "glue",
+        "lifecycle",
+        "purrr",
+        "rlang",
+        "stringr",
+        "tibble",
+        "tidyr"
+      ],
+      "Hash": "f6ceb00b6c485a472516d8d6a884b84d"
+    },
     "bslib": {
       "Package": "bslib",
       "Version": "0.9.0",
@@ -337,6 +358,23 @@
         "tidyselect"
       ],
       "Hash": "a27bfbc110818010f1b6843db9168615"
+    },
+    "cardx": {
+      "Package": "cardx",
+      "Version": "0.2.4",
+      "Source": "Repository",
+      "Repository": "CRAN",
+      "Requirements": [
+        "R",
+        "cards",
+        "cli",
+        "dplyr",
+        "glue",
+        "lifecycle",
+        "rlang",
+        "tidyr"
+      ],
+      "Hash": "7e382b32c68014326ab0b248bf87eefe"
     },
     "cellranger": {
       "Package": "cellranger",

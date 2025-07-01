@@ -29,6 +29,8 @@ library(promises)
 library(stringr)
 library(DescTools)
 library(shinycssloaders)
+library(broom)
+library(cardx)
 source("global.R")
 
 print(CONFIG)
@@ -110,9 +112,7 @@ ui <- tagList({
       "MIMIC Wizard",
       tags$small("0.7.1", style = "font-size:0.5em")
     ),
-    center = if (CONFIG$DATABASE_MODE == "DEMO"){
-      tags$div("Demo version", style = "color:green;font-weight:bold;background-color:white;")
-    },
+    center = uiOutput("demo_top_label"),
     right = tagList(
       span(textOutput("picked_profile"), class = "picked_profile"),
       htmltools::tagAppendAttributes(
@@ -592,7 +592,7 @@ server <- function(input, output, session) {
 
 
   profile_list_data <- reactive({
-    req(session_db())
+    req(application_mode(),session_db())
     input$update_profile
     dplyr::tbl(session_db(), in_schema("public", "users")) %>% collect()
   })
@@ -608,7 +608,6 @@ server <- function(input, output, session) {
 
   session$userData$selected_profile <- reactive({
     req(application_mode())
-
     raw_data <- profile_list_data() %>% filter(user_id == !!input$profile_picker)
     profile <- c()
     if (is.null(input$profile_picker) ||
@@ -681,6 +680,7 @@ server <- function(input, output, session) {
       if(isTruthy(isolate(session_db(w)))){
         tryCatchLog({
           print("Loading server")
+          print(CONFIG)
 
 
           ####
@@ -751,6 +751,13 @@ server <- function(input, output, session) {
           cohortExplorerServer("cohort_explorer", isolate(session_db))
           devSettingsServer("dev_settings", isolate(session_db))
           userProfileServer("user_profile", isolate(session_db))
+          output$demo_top_label <- renderUI({
+            if (CONFIG$DATABASE_MODE == "DEMO"){
+              tags$div("Demo version", style = "color:green;font-weight:bold;background-color:white;")
+            }else{
+              tags$div("")
+            }
+          })
           w$hide()
         })
       }
