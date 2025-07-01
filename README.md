@@ -26,7 +26,9 @@ Originally developed for clinicians, MIMICWizard supports hypothesis generation 
 
 ## 🛠 Installation and usage
 
-MIMICWizard is based on R Shiny and interact with a PostgreSQL database. Detailed setup instruction are available on the [dedicated documentation page](https://mimicwizard.readthedocs.io/en/latest/installation/) More information about the application and usage are available on the [ReadTheDocs documentation](https://mimicwizard.readthedocs.io/en/latest/)
+MIMICWizard is based on R Shiny and interact with a PostgreSQL database. Detailed setup instruction are available on the [dedicated documentation page](https://mimicwizard.readthedocs.io/en/latest/installation/).
+
+More information about the application and usage are available on the [ReadTheDocs documentation](https://mimicwizard.readthedocs.io/en/latest/).
 
 > [!IMPORTANT] 
 > Access to the full MIMIC-IV dataset requires credentialing and completion of a data use agreement. Visit [PhysioNet](https://physionet.org) for more information.
