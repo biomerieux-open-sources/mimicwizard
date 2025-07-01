@@ -6,4 +6,3 @@ core.*
 .RData
 app.Rproj
 .Rprofile
-global.R
