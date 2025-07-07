@@ -24,6 +24,12 @@ Originally developed for clinicians, MIMICWizard supports hypothesis generation 
 -   Demo mode with a lightweight dataset.
 -   Open-source and community-driven.
 
+## 🖥 Demo
+
+A demo version of the application is available at [https://mimicwizard-demo.lcr.datailor.eu/](https://mimicwizard-demo.lcr.datailor.eu/).
+
+This demo version use [MIMIC-IV demo database](https://physionet.org/content/mimic-iv-demo/2.2/), an openly-available demo of MIMIC-IV containing a subset of 100 patients.
+
 ## 🛠 Installation and usage
 
 MIMICWizard is based on R Shiny and interact with a PostgreSQL database. Detailed setup instruction are available on the [dedicated documentation page](https://mimicwizard.readthedocs.io/en/latest/installation/).
