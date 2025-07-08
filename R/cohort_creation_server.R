@@ -172,7 +172,7 @@ cohortCreationServer <- function(id, database = NULL) {
                              text_input(
                                ns("cohort_name"),
                                label = "",
-                               value = paste0("Cohort ",n_cohort+1),
+                               value = "",
                                attribs = list(disabled="disabled")
                              ),
                              class = "four wide"
@@ -183,7 +183,7 @@ cohortCreationServer <- function(id, database = NULL) {
                              text_input(
                                ns("cohort_desc"),
                                label = "",
-                               value = paste0("Cohort generated at ",format(Sys.time(), "%H:%M:%S"),". All demo cohorts are removed each day at 00h GMT."),
+                               value = "",
                                attribs = list(disabled="disabled")
                              ),
                              class = "twelve wide"
@@ -210,8 +210,8 @@ cohortCreationServer <- function(id, database = NULL) {
                              # Add cohort to d_cohorts
                              d_cohorts_data <-
                                data.frame(
-                                 cohort_name = c(paste0("Cohort ",n_cohort+1)),
-                                 cohort_description = c(paste0("Cohort generated at ",format(Sys.time(), "%H:%M:%S"),". All demo cohorts are removed each day at 00h GMT."))
+                                 cohort_name = c(input$cohort_name),
+                                 cohort_description = c(input$cohort_desc)
                                )
                              setProgress(value = 2 / 5, message = "Cohort description registration")
                              dbAppendTable(database(),
