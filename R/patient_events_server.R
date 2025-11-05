@@ -884,21 +884,6 @@ patientExplorerServer <-
             tags$tbody(rowList)
             ,class="ui collapsing celled table")))
 
-          similarity <-
-            dplyr::tbl(database(), in_schema("public", "similarity")) %>%
-            filter(hadm_id == !!input$hadm_id) %>% inner_join(admissions,by=join_by(similar_to == hadm_id)) %>% collect()
-          print(similarity)
-          sim_row <- list()
-          for (i in 1:nrow(similarity)) {
-            sim_row <- c(sim_row,list(tags$tr(tags$td(tags$a(similarity[i,][["similar_to"]],href=paste0("?subject_id=",similarity[i,][["subject_id"]],"&hadm_id=",similarity[i,][["similar_to"]]))),tags$td(similarity[i,][["similarity"]]))))
-          }
-          similarity_div <- div(tags$table(
-            tags$tbody(tagList(
-              sim_row
-            ))
-            ,class="ui very basic collapsing celled table"))
-
-
           accordion_content <-
             list(
               list(title = "Diagnoses (by ICD Code)", content = icd_div),
