@@ -867,7 +867,7 @@ request_event_from_data <-
       dplyr::tbl(database, in_schema(schema, linksto)) %>%
         filter(
           subject_id == !!subject_id &&
-            hadm_id == !!hadm_id &&
+            #hadm_id == !!hadm_id && Removed for retrieve lab results from ED
             itemid == !!itemid &&
             .data[[time_target]] == !!time_value &&
             {
@@ -893,18 +893,18 @@ request_event_from_data <-
                      "itemid") %>%
         collect()
     } else{
+
       dplyr::tbl(database, in_schema(schema, linksto)) %>%
         filter(
           subject_id == !!subject_id &&
             hadm_id == !!hadm_id &&
             itemid == !!itemid &&
             .data[[time_target]] == !!time_value &&
-            endtime == !!endtime &&
             {
               ifelse(
                 is.null(!!rlang::parse_expr(value_target)),
                 is.null(.data[[value_target]]),
-                as.numeric(.data[[value_target]]) == as.numeric(!!value)
+                .data[[value_target]] == !!value
               )
             } &&
             {
@@ -918,6 +918,12 @@ request_event_from_data <-
             filter(., stay_id == stay_id)
           else
             .
+        } %>%
+        {
+          if (linksto == "prescriptions")
+            filter(., stoptime == !!endtime)
+          else
+            filter(., endtime == !!endtime)
         } %>%
         inner_join(dplyr::tbl(database, in_schema(d_schema, event_descriptor_target[[linksto]])), by =
                      ifelse(linksto == "prescriptions","drug","itemid")) %>%
@@ -1126,14 +1132,16 @@ request_compressed_events <-
             endtime = as.POSIXct(NULL)
         )
 
+
       labevents <-
-        dplyr::tbl(database, in_schema("mimiciv_hosp", "labevents")) %>%
-        filter(subject_id == !!subject_id &
-                 hadm_id == !!hadm_id) %>%
+        admissions %>%
+        filter(hadm_id == !!hadm_id) %>%
+        cross_join(dplyr::tbl(database, in_schema("mimiciv_hosp", "labevents")) %>% filter(subject_id == !!subject_id)) %>%
+        filter(sql("charttime > admittime - INTERVAL '2 days' AND charttime < dischtime + INTERVAL '2 days'")) %>%
         inner_join(d_labitems, by = "itemid") %>%
         transmute(
-          subject_id,
-          hadm_id,
+          subject_id = subject_id.x,
+          hadm_id = hadm_id.x,
           stay_id = NULL,
           itemid,
           label,
@@ -1149,6 +1157,7 @@ request_compressed_events <-
           starttime = as.POSIXct(charttime),
           endtime = as.POSIXct(NULL)
         )
+
 
       prescriptions <-
         dplyr::tbl(database, in_schema("mimiciv_hosp", "prescriptions")) %>%
@@ -1174,10 +1183,13 @@ request_compressed_events <-
           endtime = as.POSIXct(stoptime)
         )
 
-      microbiologyevents <- dplyr::tbl(database, in_schema("mimiciv_hosp", "microbiologyevents") ) %>%
-          filter(subject_id == !!subject_id & hadm_id == !!hadm_id) %>%
-          transmute(subject_id,
-                   hadm_id,
+      microbiologyevents <-
+        admissions %>%
+        filter(hadm_id == !!hadm_id) %>%
+        cross_join(dplyr::tbl(database, in_schema("mimiciv_hosp", "microbiologyevents")) %>% filter(subject_id == !!subject_id)) %>%
+        filter(sql("charttime > admittime - INTERVAL '2 days' AND charttime < dischtime + INTERVAL '2 days'")) %>%
+          transmute(subject_id = subject_id.x,
+                    hadm_id = hadm_id.x,
                    stay_id = NULL,
                    itemid = test_itemid,
                    label= test_name,

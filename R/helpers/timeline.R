@@ -15,7 +15,11 @@ timeline <- function(x,
                      one_mn_toNA = TRUE,
                      filename = NULL,
                      elementId = "timeline",
-                     category_to_merge = list()){
+                     category_to_merge = list(),
+                     hadm_start = NULL,
+                     hadm_end = NULL,
+                     stay_start = NULL,
+                     stay_end = NULL){
 
   start_group_to_merge <- x %>%
     select(!!sym(start),!!sym(group)) %>%
@@ -38,21 +42,63 @@ timeline <- function(x,
 
   groups_label <- unname(unique(x[[group]]))
   group_option <- data.frame(
-    "id" = groups_label,
-    "content" = groups_label
+    "id" = c(groups_label,"Hospital Stay"),
+    "content" = c(groups_label,"Hospital Stay")
   )
 
   y <- bind_rows(merged,not_to_merge)
 
-  extended_content <- unlist(sapply(y[[content]],function(data){HTML(paste0(data,"<div class='ui label'>imagine</div>"))},simplify=F,USE.NAMES = F))
+  y$type <- "box"
+  y <- y %>%
+    mutate(type = case_when(
+      !is.na(.data[[end]]) ~ "range",
+      TRUE ~ type
+    ))
+
   # Format data
-  data <- data.frame(
-    id = y[["id"]],
-    start = y[[start]],
-    end  = y[[end]],
-    content = y[[content]],
-    group = y[[group]]
-  )
+  if(nrow(y)>0){
+    data <- data.frame(
+      id = 1:nrow(y),
+      start = y[[start]],
+      end  = y[[end]],
+      content = y[[content]],
+      group = y[[group]],
+      type = y[["type"]]
+    )
+  } else{
+    data <- data.frame(
+    )
+  }
+
+
+  if(!is.null(hadm_start)){
+    hadm <- data.frame(
+      id = c(nrow(data)+1),
+      start = c(hadm_start),
+      end  = c(hadm_end),
+      content = c("Hospital Stay"),
+      group = c("Hospital Stay"),
+      type = c("background"),
+      style = c("background-color: rgba(0, 255, 0, 0.2);")
+    )
+    data <- bind_rows(data,hadm)
+  }
+  if(!is.null(stay_start)){
+    stay <- data.frame(
+      id = c(nrow(data)+1),
+      start = c(stay_start),
+      end  = c(stay_end),
+      content = c("ICU Stay"),
+      group = c("ICU Stay"),
+      type = c("background"),
+      style = c("background-color: rgba(255, 0, 0, 0.2);")
+    )
+    data <- bind_rows(data,stay)
+    group_option <- data.frame(
+      "id" = c(groups_label,"Hospital Stay","ICU Stay"),
+      "content" = c(groups_label,"Hospital Stay","ICU Stay")
+    )
+  }
 
   tm <- timevis(
     data,

@@ -18,7 +18,7 @@ patientExplorerUI <- function(id) {
         ), class = "right-side-div timevis-details"),
         class = "ui segment",
         div(
-          div(class = "ui header", "Hospitalisation Timeline"),
+          div(class = "ui header", "Hospitalization Timeline"),
           uiOutput(ns("timeline_parameter_selection")),
           uiOutput(ns("timeline_parameter_display")),
           htmlOutput(ns("timeline"))
