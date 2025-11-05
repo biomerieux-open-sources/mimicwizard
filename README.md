@@ -41,6 +41,15 @@ More information about the application and usage are available on the [ReadTheDo
 
 ### 📦 Changelog
 
+**v0.8.0** (2025-11-05) Clinical notes and extended data
+General
+- Support for MIMIC-IV clinical notes (discharge), activate the flag in the global.R file
+
+Patient Explorer
+- Adding hadm/stay start and end time visualization on timeline
+- Add extended data when visualize hospitalization, get access to lab and microbiology result when data is consitent with hospital stay but not linked to a hadm_id (useful for ED lab measurement)
+- Bugfixes
+
 **v0.7.1** (2025-06-27) Bugfixes and optimization
 
 **v0.7.0** (2025-06-20) Public release associated with online demo version

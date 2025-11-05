@@ -5,17 +5,17 @@
 
 # Allow user to choose database mode (recommended for local configuration : TRUE)
 
-INTERACTIVE <- TRUE
+INTERACTIVE <- FALSE
 
 # Force application mode, only if interactive is set to FALSE
 # (accepted value: INIT_DEMO, DEMO, HOSTED)
 
-APPLICATION_MODE <- "DEMO"
+APPLICATION_MODE <- "HOSTED"
 
 # Repository where the application cache object are written
 # Default "" create a cache folder in the application directory
 # Shiny Server should have writing rights in this folder
-# Need a closing /
+# Need a closing / #/tmp/MIMICWizard/
 
 CACHE_DIR <- ""
 
@@ -24,12 +24,17 @@ CACHE_DIR <- ""
 
 IS_ED_LOADED <- FALSE
 
+# Set to TRUE if you've loaded mimiciv_note schema (if you're using mimiciv demo version, keep this to false)
+# https://www.physionet.org/content/mimic-iv-note/2.2/
+
+IS_NOTE_LOADED <- FALSE
+
 
 # Database configuration for hosted/full MIMIC-IV Postgres database
 
 HOSTED_DBNAME = ""
 HOSTED_HOST = ""
-HOSTED_PORT =
+HOSTED_PORT = 
 HOSTED_USER = ""
 HOSTED_PASSWORD = ""
 
@@ -64,6 +69,7 @@ CONFIG <- list(
   CACHE_DIR = CACHE_DIR,
   DATABASE_MODE = DATABASE_MODE,
   IS_ED_LOADED = IS_ED_LOADED,
+  IS_NOTE_LOADED = IS_NOTE_LOADED,
   HOSTED_DBNAME = HOSTED_DBNAME,
   HOSTED_HOST = HOSTED_HOST,
   HOSTED_PORT = HOSTED_PORT,

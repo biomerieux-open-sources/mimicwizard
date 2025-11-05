@@ -637,6 +637,24 @@ patientExplorerServer <-
             triage <-
               dplyr::tbl(database(), in_schema("mimiciv_ed", "triage"))
           }
+          if(IS_NOTE_LOADED){
+            discharges <-
+              dplyr::tbl(database(), in_schema("mimiciv_note", "discharge"))
+            patient_discharge <- discharges %>% filter(hadm_id == !!input$hadm_id) %>% collect()
+            if(nrow(patient_discharge)>0){
+              discharge_div <- div(
+                tags$p(tags$b("Note ID : "),patient_discharge[['note_id']]),
+                tags$p(tags$b("Chart time : "),patient_discharge[['charttime']]),
+                tags$p(tags$b("Store time : "),patient_discharge[['storetime']]),
+                tags$p(tags$b("Content : "),tags$pre(patient_discharge[['text']]))
+              )
+            } else{
+              discharge_div <- div(
+                tags$p(tags$b("No discharge note are associated with this hospital admission."))
+              )
+            }
+
+          }
           diagnoses_icd <-
             dplyr::tbl(database(),
                        in_schema("mimiciv_hosp", "diagnoses_icd"))
@@ -866,11 +884,13 @@ patientExplorerServer <-
             tags$tbody(rowList)
             ,class="ui collapsing celled table")))
 
-
           accordion_content <-
             list(
               list(title = "Diagnoses (by ICD Code)", content = icd_div),
-              list(title = "Patient services history", content = services_div)
+              list(title = "Patient services history", content = services_div),
+              {if(IS_NOTE_LOADED){
+                list(title = "Discharge Note", content = discharge_div)
+              }}
             )
 
 
@@ -1116,7 +1136,11 @@ patientExplorerServer <-
             end  = "endtime",
             content = "label",
             elementId = ns("selected_patient_timeline"),
-            category_to_merge = category_to_merge
+            category_to_merge = category_to_merge,
+            hadm_start = hadm_info()$admittime,
+            hadm_end = hadm_info()$dischtime,
+            stay_start = stay_info()$intime,
+            stay_end = stay_info()$outtime
           )
         })
 

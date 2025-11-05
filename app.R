@@ -71,7 +71,7 @@ ui <- tagList({
         class = "title",
         icon("hat wizard"),
         span("MIMICWizard"),
-        tags$small("0.7.1"),
+        tags$small("0.8"),
         div("A MIMIC-IV explorer for non technical users", class = "subtitle")
       ),
       div(
@@ -110,7 +110,7 @@ ui <- tagList({
     title = tags$span(
       icon("hat wizard"),
       "MIMIC Wizard",
-      tags$small("0.7.1", style = "font-size:0.5em")
+      tags$small("0.8", style = "font-size:0.5em")
     ),
     center = uiOutput("demo_top_label"),
     right = tagList(

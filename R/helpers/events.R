@@ -1,4 +1,7 @@
 events_magnifier <- function(item_data,template){
+  if(nrow(item_data)>1){
+    item_data = item_data[1,]
+  }
   if(template == "chartevents"){
     chartevents_to_html(item_data)
   } else if(template == "inputevents"){

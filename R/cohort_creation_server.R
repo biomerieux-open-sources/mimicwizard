@@ -162,9 +162,6 @@ cohortCreationServer <- function(id, database = NULL) {
 
                    output$persist_action <- renderUI({
                      if (!is.null(fetched_cohort())) {
-                       cohort_list <-
-                         dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>% collect()
-                       n_cohort <- nrow(cohort_list)
                       htmltools::tagAppendAttributes(form(
                          fields(
                            field(
@@ -172,8 +169,7 @@ cohortCreationServer <- function(id, database = NULL) {
                              text_input(
                                ns("cohort_name"),
                                label = "",
-                               value = "",
-                               attribs = list(disabled="disabled")
+                               value = ""
                              ),
                              class = "four wide"
                            ),
@@ -183,8 +179,7 @@ cohortCreationServer <- function(id, database = NULL) {
                              text_input(
                                ns("cohort_desc"),
                                label = "",
-                               value = "",
-                               attribs = list(disabled="disabled")
+                               value = ""
                              ),
                              class = "twelve wide"
                            )
@@ -199,9 +194,6 @@ cohortCreationServer <- function(id, database = NULL) {
 
                    persistMessage <-
                      eventReactive(input$persist_button, {
-                       cohort_list <-
-                         dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>% collect()
-                       n_cohort <- nrow(cohort_list)
                        if (input$cohort_name != "" && input$cohort_desc != "") {
                          withProgress(message = "Checking if cohort name is unique", {
                            cohort_names <-
