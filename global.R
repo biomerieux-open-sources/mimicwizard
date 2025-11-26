@@ -5,7 +5,7 @@
 
 # Allow user to choose database mode (recommended for local configuration : TRUE)
 
-INTERACTIVE <- FALSE
+INTERACTIVE <- TRUE
 
 # Force application mode, only if interactive is set to FALSE
 # (accepted value: INIT_DEMO, DEMO, HOSTED)

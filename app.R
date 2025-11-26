@@ -515,19 +515,19 @@ server <- function(input, output, session) {
 
         create_demo_data_structure(session_db)
         define_postgres_function(session_db)
-        waiter$update(html = tagList(
+        w$update(html = tagList(
           spin_pixel(),
           "Importing data from 'demo' folder (demo-mode)"
         ))
         import_demo_data(session_db, w)
-        waiter$update(html = tagList(
+        w$update(html = tagList(
           spin_pixel(),
           "Creating application schema (demo-mode)"
         ))
         create_demo_configuration(session_db)
-        waiter$update(html = tagList(spin_pixel(), "Generating database views (demo-mode)"))
+        w$update(html = tagList(spin_pixel(), "Generating database views (demo-mode)"))
         create_demo_db_views(session_db)
-        waiter$update(
+        w$update(
           html = tagList(
             spin_pixel(),
             "Demo database sucessfully populated for demo-mode, starting app..."
