@@ -887,12 +887,11 @@ patientExplorerServer <-
           accordion_content <-
             list(
               list(title = "Diagnoses (by ICD Code)", content = icd_div),
-              list(title = "Patient services history", content = services_div),
-              {if(IS_NOTE_LOADED){
-                list(title = "Discharge Note", content = discharge_div)
-              }}
+              list(title = "Patient services history", content = services_div)
             )
-
+            if(IS_NOTE_LOADED){
+                accordion_content <- c(accordion_content, list(title = "Discharge Note", content = discharge_div))
+            }
 
 
           tagList(
