@@ -374,7 +374,7 @@ query_generator <-
 
     ## --- Main Query
     itemid_clause <- paste0("itemid = ", get_param(itemid))
-    main_select <- if (schema %in% c("mimiciv_hosp", "public")) {
+    main_select <- if (schema %in% c("mimiciv_hosp", "public") && linksto != "demographics") {
       paste0(
         "SELECT DISTINCT i.subject_id AS subject_id, i.hadm_id AS hadm_id, i.stay_id AS stay_id FROM ",
         schema, ".", linksto, " t ",
