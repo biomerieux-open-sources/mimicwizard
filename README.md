@@ -79,6 +79,7 @@ Patient Explorer
 - fix : microbiology events was lacking of time attribute
 
 **v0.8.0** (2025-11-05) Clinical notes and extended data
+
 General
 - Support for MIMIC-IV clinical notes (discharge), activate the flag in the global.R file
 
