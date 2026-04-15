@@ -34,9 +34,19 @@ clinicalDataDescServer <-
                                                        ))
                                                      })))
                           }
-                          tagList(datatable_list)
+                          tagList(div(button(ns("reset_data_desc_button"), label = "Reset Data Desc.",class="green float-right mr-10")),datatable_list)
                         }
+                       else{
+                         message_box(
+                           "No data to display",
+                           HTML("Please first select a cohort and <b>Add data to clinical desc.</b> from Cohort Parameter Explorer"),
+                           class = "warning my-10"
+                         )
+                       }
 
+                     })
+                     observeEvent(input$reset_data_desc_button, {
+                       reactive_desc_data(list())
                      })
 
                    }

@@ -72,7 +72,7 @@ eventSearchbarServer <-
                          param_info <-
                            dplyr::tbl(database(), in_schema("public", "distinct_events")) %>%
                            filter(itemid == selected_itemid) %>%
-                           select("param_type", "linksto") %>%
+                           select("param_type", "linksto","unitname") %>%
                            collect()
                          if (!is.na(param_info[["param_type"]]) && (param_info[["param_type"]] == "Date and Time" ||
                                                                     param_info[["linksto"]] == "datetimeevents")) {
@@ -183,8 +183,7 @@ eventSearchbarServer <-
                                ), style = "text-align:right;max-height:2.7em;overflow-y:scroll;"),
                                class = ns("constraint-helper")
                              ),
-                             tagAppendAttributes(
-                               text_input(ns(
+                               custom_text_input(ns(
                                  paste0(
                                    selected_itemid,
                                    "-",
@@ -193,9 +192,7 @@ eventSearchbarServer <-
                                  )
                                ),
                                label = NULL,
-                               value = ""),
-                               class = ns("constraint-selector")
-                             )
+                               value = "",right_labelled = param_info[["unitname"]],attribs = list(class=ns("constraint-selector"))),
                            ),
                            class = paste0("ui field"))
 
@@ -266,9 +263,29 @@ eventSearchbarServer <-
                              type = "number"
                            )
                          ))
-
-
-
+                         exclusionCheckboxId <-
+                           ns(
+                             paste0(
+                               selected_itemid,
+                               "-",
+                               unique_label_id,
+                               "-constraint-is-exclusion"
+                             )
+                           )
+                         uiExclusionCheckbox <-
+                           custom_checkbox_input(
+                             exclusionCheckboxId,
+                             type = paste(
+                               "slider",
+                               "constraint-exclusion-enabled",
+                               ns("constraint-selector"),
+                               "my-10"
+                             ),
+                             label = "Exclude stays matching this condition",
+                             is_marked = ifelse(isTruthy(input[[exclusionCheckboxId]]),
+                                                TRUE,
+                                                FALSE)
+                           )
 
                          tagList(
                            div(paste0(
@@ -278,6 +295,9 @@ eventSearchbarServer <-
                                   uiConstraintType,
                                   uiConstraintAggr),
                            uiConstraintValue,
+                           segment(
+                             uiExclusionCheckbox
+                           ),
                            segment(
                              uiConstraintTimeCheckbox,
                              htmltools::tagAppendAttributes(minMaxTimeField, style =
@@ -328,7 +348,7 @@ eventSearchbarServer <-
                            ns("select_filter")
                          ))
                          runjs(
-                           "$('.ui.label.filter').popup({on:'click',position:'bottom left',movePopup: false});"
+                           "$('.ui.label.filter').popup({on:'click',position:'bottom left', lastResort: 'top right',movePopup: false});"
                          )
                          runjs(paste0(
                            '$( "#',
@@ -355,7 +375,7 @@ eventSearchbarServer <-
                            class = "ui selection dropdown"
                          ),
                          tags$small(
-                           "Default operator between two condition is OR, you must explicit AND condition",
+                           "Default operator between two condition is OR, you must explicit AND condition. You can use AND/OR/parenthesis to create complex condition. Please",HTML("<a href='https://mimicwizard.readthedocs.io/en/latest/explore/#create-a-retrospective-cohort-from-mimic-patients-cohort-creation'>read documentation</a>"), "for visual example",
                            style = "font-weight:bold;"
                          )
                        ))
@@ -507,7 +527,7 @@ eventSearchbarServer <-
                            cachedTibble <- NULL
                          }
 
-
+                         error <- ""
                          if (is.null(value)) {
                            #For large/complex requesting, use a dedicated db connection to not freeze app
                            dedicated_db_link <- connect_to_mimic()
@@ -524,8 +544,9 @@ eventSearchbarServer <-
                                distinct() %>% collect()
                              value <-
                                paste(request[[selected_field]], collapse = ", ")
-                           } else if (!is.na(param_info[["param_type"]]) && param_info[["param_type"]] == "Date and Time") {
-                             value <-  "Not implemented yet : DateTime field"
+                           } else if ((!is.na(param_info[["param_type"]]) && param_info[["param_type"]] == "Date and Time")||
+                                      (!is.na(param_info[["linksto"]]) && param_info[["linksto"]] == "datetimeevents")) {
+                             error <-  "Not implemented yet : DateTime field"
                            } else if (!is.na(param_info[["param_type"]]) && param_info[["param_type"]] == "Checkbox") {
                              value <- "1,0"
                            } else if (!is.na(param_info[["param_type"]]) && param_info[["param_type"]] == "Numeric") {
@@ -598,28 +619,31 @@ eventSearchbarServer <-
                              }
 
                            }
-                           updatedCache <-
-                             bind_rows(
-                               cachedTibble,
-                               tibble(
-                                 itemid = selected_itemid,
-                                 field = selected_field,
-                                 value = value
+                           if(error == ""){
+                             updatedCache <-
+                               bind_rows(
+                                 cachedTibble,
+                                 tibble(
+                                   itemid = selected_itemid,
+                                   field = selected_field,
+                                   value = value
+                                 )
+                               )
+                             saveRDS(
+                               updatedCache,
+                               file = paste0(
+                                 CONFIG$CACHE_DIR,
+                                 "cache/cohort_creation/",
+                                 param_info[["linksto"]],
+                                 ".Rda"
                                )
                              )
-                           saveRDS(
-                             updatedCache,
-                             file = paste0(
-                               CONFIG$CACHE_DIR,
-                               "cache/cohort_creation/",
-                               param_info[["linksto"]],
-                               ".Rda"
-                             )
-                           )
-                           dbDisconnect(dedicated_db_link)
+                             dbDisconnect(dedicated_db_link)
+                           }
+
                          }
 
-                         session$sendCustomMessage(ns("setConstraintHelper"), paste0(labelId, "&", value))
+                         session$sendCustomMessage(ns("setConstraintHelper"), paste0(labelId, "&", value, "&", error))
                        }
                      })
 
@@ -644,7 +668,7 @@ eventSearchbarServer <-
                        ),field(
                          selectInput(ns("icd_to_deny_condition"),"Condition to apply to excluded ICD code list",c("OR","AND")),
                          class="two wide"
-                       )))
+                       )),class="mt-10")
                      })
 
 
@@ -657,7 +681,7 @@ eventSearchbarServer <-
 
 
                      output$fetch_action <- renderUI({
-                       if (unique_label_id() > 100000 & !is_realtime) {
+                       if ((unique_label_id() > 100000 || isTruthy(input$icd_to_keep) || isTruthy(input$icd_to_deny)) && !is_realtime) {
                          #at least one condition
                          tagList(tagAppendAttributes(field(
                            button(ns("fetch-button"), label = trigger_label)
@@ -676,6 +700,7 @@ eventSearchbarServer <-
                      condition_object <- reactive({
 
                        if (length(input$filter_tojson) != 0) {
+                         isolate({
                          result_object <-
                            fromJSON(input$filter_tojson, simplifyVector = FALSE)
                          if (result_object$message != "OK") {
@@ -720,6 +745,7 @@ eventSearchbarServer <-
                                      aggr = row$aggr,
                                      field = row$field,
                                      value = row$value,
+                                     is_exclusion = isTRUE(row$is_exclusion),
                                      time_constraint = list(
                                        "is_time_constrained" = row$is_time_constrained,
                                        "time_min" = row$time_min,
@@ -780,7 +806,7 @@ eventSearchbarServer <-
                            }
 
                          }
-
+                         })
                        }
                      })
 
@@ -835,6 +861,8 @@ eventSearchbarServer <-
                          ns("constraint-selector"),
                          "', function() {
                        eventTarget = $(this);
+                       console.log(eventTarget)
+                       console.log('Persisted in DOM')
                        let labelId = eventTarget.closest('.ui.popup').attr('linkedlabel');
                        $('#",ns("label"),"-'+labelId+' > .ui.label').html('');
                        eventTarget.parent().parent().find('.",
@@ -845,9 +873,16 @@ eventSearchbarServer <-
                        }
                        else if($(this).hasClass('constraint-time-enabled')){
                           if($(this).find('input').prop('checked')){
-                              $(this).attr('checked');
+                              $(this).find('input').attr('checked',true);
                           } else{
-                              $(this).removeAttr('checked');
+                              $(this).find('input').removeAttr('checked');
+                          }
+                       }
+                       else if($(this).hasClass('constraint-exclusion-enabled')){
+                          if($(this).find('input').prop('checked')){
+                              $(this).find('input').attr('checked',true);
+                          } else{
+                              $(this).find('input').removeAttr('checked');
                           }
                        }
                        else{
@@ -866,10 +901,12 @@ eventSearchbarServer <-
                           constraintTime = ' (' + constraintTimeMin + 'h-' + constraintTimeMax + 'h)';
                        }
                        constraintValue = popup.find('input').val();
+                       isExclusion = popup.find('.constraint-exclusion-enabled > input').prop('checked');
+                       exclusionPrefix = isExclusion ? 'EXCLUDE ' : '';
                        if(constraintAggr!=''){
                         constraintField = constraintAggr + '(' + constraintField + ')';
                        }
-                        $('#",ns("label"),"-'+labelId+' > .ui.label').html(constraintField + ' ' + constraintType + ' ' + constraintValue + constraintTime);
+                        $('#",ns("label"),"-'+labelId+' > .ui.label').html(exclusionPrefix + constraintField + ' ' + constraintType + ' ' + constraintValue + constraintTime);
                        });
                        $('body').on('click','.linkstolabel.close',function(e) {
                           $(e.target).parent().parent().remove()
@@ -919,9 +956,6 @@ eventSearchbarServer <-
                        }
                      }
 
-
-
-
                      # Client-side function converting HTML DOM inside div with targetFilterContainerID in a javascript condition array
                      # Check also parenthesis parsing and unrecognised keyword in div
                      shinyjs::runjs(
@@ -944,8 +978,14 @@ eventSearchbarServer <-
                           isTimeConstrained = $(this).find('.constraint-time-enabled > input').prop('checked')
                           constraintTimeMin = $(this).find('.constraint-time-min').val();
                           constraintTimeMax = $(this).find('.constraint-time-max').val();
+                          isExclusion = $(this).find('.constraint-exclusion-enabled > input').prop('checked') || false;
                           if(['Is','Is Not','Contains','Not Contains','=','<>','>','<','<=','>='].includes(constraintType) && constraintValue.length == 0){
                             errorMessage += 'Constraint is inconsistent (using a with param. constraint without giving any value).<br>';
+                            isInconsistent = true;
+                            return null;
+                          }
+                          if(['Exist','Is True','Is False'].includes(constraintType) && constraintValue.length != 0){
+                            errorMessage += 'Constraint is inconsistent (using a without param. constraint and giving a value).<br>';
                             isInconsistent = true;
                             return null;
                           }
@@ -958,7 +998,8 @@ eventSearchbarServer <-
                             'value': constraintValue,
                             'is_time_constrained': isTimeConstrained,
                             'time_min': constraintTimeMin,
-                            'time_max': constraintTimeMax
+                            'time_max': constraintTimeMax,
+                            'is_exclusion': isExclusion
                           });
                         } else {
                           //is text
@@ -1037,9 +1078,15 @@ eventSearchbarServer <-
                         });
                         Shiny.addCustomMessageHandler('",ns("setConstraintHelper"),"', function(raw_data) {
                           data = raw_data.split('&');
-                          console.log('",ns("label"),"-'+ data[0] +' + .ui.popup > .ui.field > label')
                           targetedLabel = $('#",ns("label"),"-'+ data[0] +' + .ui.popup > .ui.field > label');
-                          let spanContainer = targetedLabel.find('span')
+                          let spanContainer = targetedLabel.find('span');
+                          if(data[2] != ''){
+                            spanContainer.html('<span class=\"red\">'+data[2]+'</span>');
+                            targetedLabel.find('i').removeClass('notched circle loading glasses');
+                            targetedLabel.find('i').addClass('times circle red');
+                            targetedLabel.find('i').css('cursor','default');
+                            return;
+                          }
                           elementList = data[1].split(',');
                           for(el of elementList){
                             let dom = $('<span class=\"constraint-pickable\"></span>').text(el+',');
@@ -1065,7 +1112,7 @@ eventSearchbarServer <-
                          "'][id$='-constraint_field']\", function(e) {
                          targetedLabel = $(e.target).closest('.ui.popup').find('.ui.field > label');
                          targetedLabel.find('span').html('');
-                         targetedLabel.find('i').removeClass('check');
+                         targetedLabel.find('i').removeClass('check red');
                          targetedLabel.find('i').css('cursor','pointer');
                          targetedLabel.find('i').addClass('glasses');
 

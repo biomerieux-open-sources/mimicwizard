@@ -20,8 +20,8 @@ cohortExplorerUI <- function(id) {
                form(
                  htmltools::tagAppendAttributes(fields(
                  htmltools::tagAppendAttributes(uiOutput(ns("parameter_picker_ui")),class="field"),
-                 field(uiOutput(ns("field_picker"))),
-                 field(uiOutput(ns("force_cast")))
+                 field(uiOutput(ns("field_picker_ui"))),
+                 field(uiOutput(ns("force_cast_ui")))
                ),class="three my-10"),
                uiOutput(ns("fetch_action"))
                ),
@@ -33,7 +33,7 @@ cohortExplorerUI <- function(id) {
                uiOutput(ns("stratification_result"))
              ),style="min-height:50vh"),
              list(menu = "Cohort Patient Explorer", content = patientExplorerUI(ns("cohort_patient_explorer"))),
-             list(menu = "Clinical Data Desc.", content = tagList(button(ns("reset_data_desc_button"), label = "Reset Data Desc.",class="green float-right mr-10"),clinicalDataDescUI(ns("clinical_data_desc"))))
+             list(menu = "Clinical Data Desc.", content = clinicalDataDescUI(ns("clinical_data_desc")))
            ),
          id = "tabset"
   )

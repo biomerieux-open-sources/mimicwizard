@@ -2,6 +2,7 @@ cohortOutcomesExplorerUI <- function(id) {
   ns <- NS(id)
   tagList(
     withSpinner(uiOutput(ns("outcomes_result"))),
-    uiOutput(ns("stratification_manager"))
+    uiOutput(ns("stratification_manager")),
+    uiOutput(ns("download_buttons"))
   )
 }

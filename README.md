@@ -41,6 +41,43 @@ More information about the application and usage are available on the [ReadTheDo
 
 ### 📦 Changelog
 
+**v1.0** (2026-04-15)
+General
+- Ready to deploy
+- Bugfixes
+
+**v0.9.1** (2026-04-01)
+
+Event Searchbar :
+- feat : add unit of measure on value field
+- enhancement : error when using event filtering are now more explicit 
+- fix : correct error throwing on datetimeevents
+- fix : auto-convert comma with point when filtering with numerical value 
+
+Cohort Explorer :
+- fix : refresh and delete button
+
+
+**v0.9.0** (2026-03-25)
+
+Patient explorer:
+- fix: longitudinal trajectory is now not restricted to a 1 hour timestep
+
+Cohort creation:
+- feat : cohort creation can now be based on exclusion criteria, in addition to inclusion criteria
+- fix : fetch button now show if ICD only criteria are set
+
+Cohort explorer:
+- feat : cohort outcomes data can now be exported in csv format 
+- fix : we added some warning when using statistical testing in Clinical Data Desc. tab
+
+**v0.8.1** (2026-03-03)
+Cohort Explorer :
+- feat : cohort parameter exploration now support advanced stratification
+
+Patient Explorer
+- fix : microbiology events was lacking of time attribute
+
 **v0.8.0** (2025-11-05) Clinical notes and extended data
 General
 - Support for MIMIC-IV clinical notes (discharge), activate the flag in the global.R file

@@ -13,13 +13,6 @@
 DROP SCHEMA IF EXISTS public CASCADE;
 CREATE SCHEMA public;
 
-CREATE TABLE public.cohort (
-	cohort_id float8 NULL,
-	subject_id float8 NULL,
-	hadm_id float8 NULL,
-	stay_id float8 NULL
-);
-
 CREATE TABLE public.customevents (
 	subject_id float8 NULL,
 	hadm_id float8 NULL,
@@ -58,6 +51,14 @@ CREATE TABLE public.d_cohorts (
 	cohort_id int4 DEFAULT nextval('d_cohorts_seq'::regclass) NOT NULL,
 	cohort_name varchar NULL,
 	cohort_description text NULL
+);
+
+CREATE TABLE public.cohort (
+	cohort_id int4 NOT NULL,
+	subject_id int4 NOT NULL,
+	hadm_id int4 NOT NULL,
+	stay_id int4 NOT NULL,
+	CONSTRAINT d_cohorts_cohort_fk_1 FOREIGN KEY (cohort_id) REFERENCES public.d_cohorts(cohort_id) ON DELETE CASCADE
 );
 
 CREATE TABLE public.d_customevents (
@@ -216,7 +217,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    i.intime AS charttime,
+    i.outtime AS charttime,
     9 AS itemid,
     'Length of ICU Stay (LIS)'::text AS label,
     ceil(date_part('epoch'::text, i.outtime - i.intime) / 3600::double precision)::text AS value,
@@ -237,7 +238,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    i.outtime AS charttime,
+    (SELECT endtime FROM mimiciv_derived.icustay_hourly ih WHERE ih.stay_id = i.stay_id ORDER BY stay_id,hr DESC LIMIT 1) AS charttime,
     11 AS itemid,
     'Death in ICU'::text AS label,
         CASE
@@ -252,7 +253,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    i.outtime AS charttime,
+    admissions.dischtime AS charttime,
     12 AS itemid,
     'Death in Hospital'::text AS label,
         CASE
@@ -289,6 +290,20 @@ UNION
             WHEN patients.dod <= (i.intime + '1 year'::interval) THEN 'Yes'::text
             ELSE 'No'::text
         END AS value,
+    ''::text AS valueuom
+   FROM mimiciv_icu.icustays i
+     JOIN mimiciv_hosp.admissions USING (subject_id, hadm_id)
+     JOIN mimiciv_hosp.patients USING (subject_id)
+UNION
+ SELECT i.subject_id,
+    i.hadm_id,
+    i.stay_id,
+    i.intime AS charttime,
+    15 AS itemid,
+    'ICU admission count'::text AS label,
+    (( SELECT count(*) AS count
+           FROM mimiciv_icu.icustays icu
+          WHERE icu.hadm_id = i.hadm_id AND icu.intime <= i.intime))::text AS value,
     ''::text AS valueuom
    FROM mimiciv_icu.icustays i
      JOIN mimiciv_hosp.admissions USING (subject_id, hadm_id)
