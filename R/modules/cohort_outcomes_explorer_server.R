@@ -173,14 +173,68 @@ cohortOutcomesExplorerServer <-
 
       apply_condition_object <- function(stay_to_filter,
                                          condition_object) {
-        strat_data <-
-          request_constrained(
-            condition_object,
-            is_synchronous = T,
-            cohort_filter = input$cohort_picker
+
+        constraint_list <- condition_object$constraint_list
+        table_count <- length(constraint_list)
+        strat_data <- list()
+        errors <- list()
+
+        if (condition_object$condition_string != "") {
+          for (condition_id in 1:table_count) {
+            key <- paste0("condition_", condition_id)
+            strat_data[[key]] <- tryCatch({
+              dedicated_db_link <- connect_to_mimic()
+              data <- get_constrained_table(
+                dedicated_db_link,
+                constraint_list[[as.character(condition_id)]]$linksto,
+                constraint_list[[as.character(condition_id)]]$constraint,
+                input$cohort_picker
+              ) %>% collect()
+              DBI::dbDisconnect(dedicated_db_link)
+              data
+            }, error = function(e) {
+              tryCatch(DBI::dbDisconnect(dedicated_db_link), error = function(e2) NULL)
+              errors[[key]] <<- conditionMessage(e)
+              NULL
+            })
+          }
+        }
+
+        if (length(errors) > 0) {
+          failed_details <- paste(
+            sapply(names(errors), function(k) paste0("[", k, "] ", errors[[k]])),
+            collapse = "<br>"
           )
+          error_indices <- sapply(names(errors), function(k) as.integer(gsub("condition_", "", k)))
+          return(list(
+            status = "error",
+            message = failed_details,
+            error_indices = error_indices
+          ))
+        }
+
+        # Check if any condition uses exclusion
+        has_exclusion <- any(sapply(condition_object$constraint_list, function(c) isTRUE(c$constraint$is_exclusion)))
+        universe <- NULL
+        if (has_exclusion) {
+          universe <- dplyr::tbl(database(), in_schema("public", "cohort")) %>%
+            filter(cohort_id == !!input$cohort_picker) %>%
+            select(subject_id, hadm_id, stay_id) %>%
+            collect()
+        }
         for (key in names(strat_data)) {
-          assign(key, strat_data[[key]])
+          condition_idx <- gsub("condition_", "", key)
+          data <- strat_data[[key]]
+          if (isTRUE(condition_object$constraint_list[[condition_idx]]$constraint$is_exclusion)) {
+            # Pre-compute complement: stays in universe NOT matching this condition
+            join_by <- if (!("stay_id" %in% names(data)) || is.null(data$stay_id[1])) {
+              c("subject_id", "hadm_id")
+            } else {
+              c("subject_id", "hadm_id", "stay_id")
+            }
+            data <- anti_join(universe, data, by = join_by)
+          }
+          assign(key, data)
         }
         escaped_expression <-
           parsecondition(condition_object$condition_string)
@@ -212,7 +266,8 @@ cohortOutcomesExplorerServer <-
         intersect(icd_filtered_result$stay_id, stay_to_filter)
       }
 
-
+      cohort_outcomes_export <- reactiveVal()
+      cohort_icd_export <- reactiveVal()
       output$outcomes_result <- renderUI({
         if (isTruthy(cohort_id())) {
           cohort <- dplyr::tbl(database(), in_schema("public", "cohort"))
@@ -229,35 +284,81 @@ cohortOutcomesExplorerServer <-
             {
               if (isolate(strat_counter()) > 0) {
                 stratified_stay_df <- .
+                strat_errors <- list()
+                # Clear error classes on all stratification searchbars
+                for (clear_i in 1:isolate(strat_counter())) {
+                  runjs(paste0(
+                    "$('#", ns(paste0("strat", clear_i)), "-filter-container').find('.ui.label.filter').each(function() {",
+                    "   $(this).removeClass('event-error');",
+                    "});"
+                  ))
+                }
                 for (strat_i in 1:isolate(strat_counter())) {
                   selected_stay <- apply_condition_object((
                     stratified_stay_df %>% filter(strat == "Whole Cohort")
                   )$stay_id,co_strat[[strat_i]]())
+                  if (is.list(selected_stay) && identical(selected_stay$status, "error")) {
+                    # Highlight error conditions in this searchbar
+                    if (!is.null(selected_stay$error_indices)) {
+                      error_indices_js <- paste0("[", paste(selected_stay$error_indices, collapse = ","), "]")
+                      runjs(paste0(
+                        "let errIdx", strat_i, " = ", error_indices_js, ";",
+                        "$('#", ns(paste0("strat", strat_i)), "-filter-container').find('.ui.label.filter').each(function(index) {",
+                        "   if (errIdx", strat_i, ".includes(index + 1)) {",
+                        "       $(this).addClass('event-error');",
+                        "   }",
+                        "});"
+                      ))
+                    } else {
+                      # Whole request failed, mark all filters as error
+                      runjs(paste0(
+                        "$('#", ns(paste0("strat", strat_i)), "-filter-container').find('.ui.label.filter').addClass('event-error');"
+                      ))
+                    }
+                    strat_errors[[length(strat_errors) + 1]] <- paste0(
+                      "Stratification ", strat_i, ": ", selected_stay$message
+                    )
+                    next
+                  }
                   stratified_stay_df <- stratified_stay_df %>% mutate(
                     strat = ifelse(
                       stay_id %in% selected_stay,ifelse(
-                          !!input[[paste0("strat", strat_i, "_label")]] != "",
-                          !!input[[paste0("strat", strat_i, "_label")]],
+                          input[[paste0("strat", strat_i, "_label")]] != "",
+                          input[[paste0("strat", strat_i, "_label")]],
                           paste("Stratification", strat_i)
                         ) ,
                      strat
                     )
                   )
                 }
-                stratified_stay_df %>% mutate(strat = ifelse(
-                  strat == "Whole Cohort",
-                  ifelse(
-                    !!input$others_label != "",
-                    !!input$others_label,
-                    "Others"
-                  ) ,
-                  strat
-                ))
+                if (length(strat_errors) > 0) {
+                  message_box(
+                    "An error has occured",
+                    HTML(paste0(
+                      "The following stratification(s) failed:<br><code>",
+                      paste(strat_errors, collapse = "<br>"),
+                      "</code>"
+                    )),
+                    class = "negative my-10",
+                    closable = TRUE
+                  )
+                } else {
+                  stratified_stay_df %>% mutate(strat = ifelse(
+                    strat == "Whole Cohort",
+                    ifelse(
+                      input$others_label != "",
+                      input$others_label,
+                      "Others"
+                    ) ,
+                    strat
+                  ))
+                }
               } else{
                 .
               }
 
             }
+          if (inherits(stratified_data, "shiny.tag")) return(stratified_data)
           wider_stratified <- stratified_data %>%
             transmute(strat,label, value,valueuom) %>%
             group_by(strat,label,valueuom) %>%
@@ -284,9 +385,9 @@ cohortOutcomesExplorerServer <-
             filter(seq_num <= 5) %>% inner_join(d_icd_diagnoses,by=c("icd_version","icd_code")) %>%
           count(icd_code,icd_version,long_title,strat,sort = TRUE) %>% collect()
           segment_color <- c("red","orange","yellow","olive","green","blue")
-
-          withSpinner(tagList(render_gt({
-            tbl_summary(
+          cohort_outcomes_export(wider_stratified)
+          cohort_icd_export(icd_data)
+          gt_table <- tbl_summary(
               wider_stratified,
               include = c(
                 "age (y.o.)",
@@ -323,26 +424,9 @@ cohortOutcomesExplorerServer <-
                 }
               } %>%
               bold_labels() %>%
-              as_gt() %>%
-              tab_row_group("Baseline characteristics",
-                            rows=if(length(as.factor(
-                              unique(wider_stratified$gender)
-                            )) == 2) 1:8 else 1:7) %>%
-              tab_row_group("Parameters at ICU admission",
-                            rows=if(length(as.factor(
-                              unique(wider_stratified$gender)
-                            )) == 2) 9:10 else 8:9) %>%
-              tab_row_group("Outcomes", rows=if(length(as.factor(
-                unique(wider_stratified$gender)
-              )) == 2) 11:(length(.)-1) else 10:(length(.)-2)) %>%
-              row_group_order(
-                groups = c(
-                  "Baseline characteristics",
-                  "Parameters at ICU admission",
-                  "Outcomes"
-                )
-              )
-          }), div(tagList(
+              as_gt()
+
+          withSpinner(tagList(HTML(gt::as_raw_html(gt_table)), div(tagList(
             lapply(c(
               "strat",
               "age (y.o.)",
@@ -381,8 +465,8 @@ cohortOutcomesExplorerServer <-
               tagList(
               lapply(1:isolate(strat_counter()), function(strat_i) {
                 strat_name <- ifelse(
-                  !!input[[paste0("strat", strat_i, "_label")]] != "",
-                  !!input[[paste0("strat", strat_i, "_label")]],
+                  input[[paste0("strat", strat_i, "_label")]] != "",
+                  input[[paste0("strat", strat_i, "_label")]],
                   paste("Stratification", strat_i)
                 )
                 div(segment(tags$h5(paste0("Most frequents ICD code for ",strat_name)),tags$table(
@@ -398,15 +482,15 @@ cohortOutcomesExplorerServer <-
                 ,class=segment_color[strat_i],style="height:350px;"),class = "four wide column")
               }),
               div(segment(tags$h5(paste0("Most frequents ICD code for ",ifelse(
-                !!input$others_label != "",
-                !!input$others_label,
+                input$others_label != "",
+                input$others_label,
                 "Others"
               ))),tags$table(
                 class = "ui very basic collapsing celled table",
                 tags$tr(tags$th("ICD Code"),tags$th("Count")),
                 apply(icd_data %>% filter(strat == ifelse(
-                  !!input$others_label != "",
-                  !!input$others_label,
+                  input$others_label != "",
+                  input$others_label,
                   "Others"
                 )) %>% head(5), 1, function(icd_row) {
                   tags$tr(
@@ -440,5 +524,41 @@ cohortOutcomesExplorerServer <-
         input$execute_stratification
         cohort_id()
       }, ignoreInit = FALSE, ignoreNULL = TRUE)
+
+      output$download_buttons <- renderUI({
+        if(isTruthy(cohort_id())){
+          div(
+            downloadButton(
+              ns("download_cohort_outcomes"),
+              label = "Export Outcomes to CSV",
+              class = "ui button basic green",
+              icon = icon("download icon")
+            ),
+            downloadButton(
+              ns("download_cohort_icd"),
+              label = "Export ICD to CSV",
+              class = "ui button basic green",
+              icon = icon("download icon")
+            ),class="my-10")
+        }
+
+      })
+      output$download_cohort_outcomes <- downloadHandler(
+            filename = function() {
+              paste0("cohort_outcomes_export_", cohort_id(), ".csv")
+            },
+            content = function(file) {
+              write.csv(cohort_outcomes_export(), file, row.names = FALSE)
+            }
+        )
+      output$download_cohort_icd <- downloadHandler(
+        filename = function() {
+          paste0("cohort_diagnoses_export_", cohort_id(), ".csv")
+        },
+        content = function(file) {
+          write.csv(cohort_icd_export(), file, row.names = FALSE)
+        }
+      )
+
       })
       }

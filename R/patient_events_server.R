@@ -884,6 +884,11 @@ patientExplorerServer <-
             tags$tbody(rowList)
             ,class="ui collapsing celled table")))
 
+
+
+
+
+
           accordion_content <-
             list(
               list(title = "Diagnoses (by ICD Code)", content = icd_div),

@@ -64,7 +64,7 @@ custom_checkbox_input <- function (input_id, label = "", type = NULL, is_marked 
 }
 
 custom_text_input <- function (input_id, label = NULL, value = "", type = "text",
-          placeholder = NULL, attribs = list())
+          placeholder = NULL, right_labelled = "", attribs = list())
 {
   if (!type %in% c("text", "textarea", "password", "email",
                    "url", "tel")) {
@@ -78,6 +78,10 @@ custom_text_input <- function (input_id, label = NULL, value = "", type = "text"
                         placeholder = placeholder)
   }
   for (i in names(attribs)) input$attribs[[i]] <- attribs[[i]]
+  if (isTruthy(right_labelled) && right_labelled != ""){
+    input <- tags$div(input, tags$div(right_labelled,class = "ui label"), class="ui right labeled input")
+  }
+
   if (is.null(label))
     input
   else tags$div(tags$label(label), input,class="field")

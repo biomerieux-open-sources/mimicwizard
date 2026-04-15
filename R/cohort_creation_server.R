@@ -17,7 +17,12 @@ cohortCreationServer <- function(id, database = NULL) {
                    fetched_cohort <- reactiveVal(NULL)
 
                    output$fetched_details <- renderUI({
-                     if (length(condition_object()) != 0) {
+                     if (is.list(condition_object()) != 0) {
+                       runjs(paste0(
+                         "$('#", ns("event_searchbar"), "-filter-container').find('.ui.label.filter').each(function(index) {",
+                         "       $(this).removeClass('event-error');",
+                         "});"
+                       ))
                        # Progress 0-1 init 1-4 request, 4-5 apply logic, 5-6 compute details
                        progress <- Progress$new(session, min = 0, max = 7)
                        progress$set(message = 'Generating request')
@@ -27,11 +32,80 @@ cohortCreationServer <- function(id, database = NULL) {
                        promise_list <-
                          request_constrained(user_condition_object, progress)
                        print("Step 2 Resolve")
-                       promise_all(.list = promise_list)  %...>% (function(data) {
+                       settled_list <- lapply(names(promise_list), function(key) {
+                         promise_list[[key]] %>%
+                           then(
+                             onFulfilled = function(val) list(key = key, status = "ok", value = val),
+                             onRejected  = function(e)   list(key = key, status = "error", error = conditionMessage(e))
+                           )
+                       })
+                       names(settled_list) <- names(promise_list)
+                       promise_all(.list = settled_list)  %...>% (function(results) {
                        print("Step 3 All is resolved")
+
+                         errors <- Filter(function(r) r$status == "error", results)
+
+                         if (length(errors) > 0) {
+
+                           failed_details <- paste(
+                             sapply(errors, function(r) paste0("[", r$key, "] ", r$error)),
+                             collapse = "<br>"
+                           )
+
+                           # Build a JS array of error indices (extracted from r$key)
+                           error_indices <- paste0(
+                             "[",
+                             paste(
+                               sapply(errors, function(r) as.integer(strsplit(r$key, "_")[[1]][2])),
+                               collapse = ","
+                             ),
+                             "]"
+                           )
+
+                           progress$close()
+
+                           runjs(paste0(
+                             "let errIdx = ", error_indices, ";",
+                             "$('#", ns("event_searchbar"), "-filter-container').find('.ui.label.filter').each(function(index) {",
+                             "   if (errIdx.includes(index + 1)) {",
+                             "       $(this).addClass('event-error');",
+                             "   }",
+                             "});"
+                           ))
+
+                           return(message_box(
+                             "An error has occured",
+                             HTML(paste0("Are you sure every event has a set and meaningful condition ? That all your parenthesis are correct ? <br> The following query conditions failed:<br><code>", failed_details, "</code>")),
+                             class = "negative my-10",
+                             closable = TRUE
+                           ))
+                         }
+
+                         data <- lapply(results, function(r) r$value)
+                         names(data) <- sapply(results, function(r) r$key)
                          start.time <- Sys.time()
+                         # Check if any condition uses exclusion
+                         has_exclusion <- any(sapply(user_condition_object$constraint_list, function(c) isTRUE(c$constraint$is_exclusion)))
+                         universe <- NULL
+                         if (has_exclusion) {
+                           universe <- dplyr::tbl(database(), in_schema("public", "demographics")) %>%
+                             select(subject_id, hadm_id, stay_id) %>%
+                             distinct() %>%
+                             collect()
+                         }
                          for(key in names(data)){
-                           assign(key,data[[key]])
+                           condition_idx <- gsub("condition_", "", key)
+                           d <- data[[key]]
+                           if (isTRUE(user_condition_object$constraint_list[[condition_idx]]$constraint$is_exclusion)) {
+                             # Pre-compute complement: stays in universe NOT matching this condition
+                             join_by <- if (!("stay_id" %in% names(d)) || is.null(d$stay_id[1])) {
+                               c("subject_id", "hadm_id")
+                             } else {
+                               c("subject_id", "hadm_id", "stay_id")
+                             }
+                             d <- anti_join(universe, d, by = join_by)
+                           }
+                           assign(key, d)
                          }
                          escaped_expression <- parsecondition(user_condition_object$condition_string)
                          expression_to_eval <- gsub("[","(",escaped_expression,fixed=T)
@@ -143,17 +217,12 @@ cohortCreationServer <- function(id, database = NULL) {
                          accordion(accordion_content,
                                    active_title = "Cohort Summary",
                                    fluid = TRUE)
-                       }) %...!% (function(e){
-                         progress$close()
-                         message_box(
-                           "An error has occured",
-                           HTML(paste0("Are you sure every event has a set and meaningful condition ? That all your parenthesis are correct ? <br><br><b>Error detail :</b><br><code>",e,"</code>")),
-                           class = "negative my-10",
-                           closable = T
-                         )
-
-                     })
-}
+                       })
+                     }
+                     else{
+                       fetched_cohort(NULL)
+                       NULL
+                     }
                    })
                    # ************************************************************************************#
                    #---------------------------------- PERSIST COHORT ------------------------------------
@@ -161,6 +230,7 @@ cohortCreationServer <- function(id, database = NULL) {
 
 
                    output$persist_action <- renderUI({
+
                      if (!is.null(fetched_cohort())) {
                       htmltools::tagAppendAttributes(form(
                          fields(
@@ -194,7 +264,7 @@ cohortCreationServer <- function(id, database = NULL) {
 
                    persistMessage <-
                      eventReactive(input$persist_button, {
-                       if (input$cohort_name != "" && input$cohort_desc != "") {
+                       if (input$cohort_name != "" && input$cohort_desc != "" && !is.null(fetched_cohort())) {
                          withProgress(message = "Checking if cohort name is unique", {
                            cohort_names <-
                              dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>% select("cohort_name") %>% collect()
@@ -240,6 +310,7 @@ cohortCreationServer <- function(id, database = NULL) {
                                ),
                                "green"
                              )
+                             fetched_cohort(NULL)
                              message_box(
                                "Persist action success",
                                "Your now able to explore your cohort in Cohort Explorer page",

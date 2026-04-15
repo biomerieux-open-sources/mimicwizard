@@ -10,7 +10,7 @@ INTERACTIVE <- TRUE
 # Force application mode, only if interactive is set to FALSE
 # (accepted value: INIT_DEMO, DEMO, HOSTED)
 
-APPLICATION_MODE <- "HOSTED"
+APPLICATION_MODE <- "DEMO"
 
 # Repository where the application cache object are written
 # Default "" create a cache folder in the application directory
@@ -34,7 +34,7 @@ IS_NOTE_LOADED <- FALSE
 
 HOSTED_DBNAME = ""
 HOSTED_HOST = ""
-HOSTED_PORT = 
+HOSTED_PORT = 5432
 HOSTED_USER = ""
 HOSTED_PASSWORD = ""
 

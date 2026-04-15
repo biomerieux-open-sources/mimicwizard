@@ -6,14 +6,6 @@ cohortExplorerServer <- function(id,
     if (!is.null(database)) {
       selected_profile <- session$userData$selected_profile
 
-      condition_object <-
-        eventSearchbarServer(
-          "event_searchbar",
-          database,
-          search_label = "Select the parameter(s) you want to use for stratification",
-          is_realtime = T
-        )
-
       cohortOutcomesExplorerServer("cohort_outcomes_explorer",database,isolate(reactive(input$cohort_picker)))
 
       cohort_restriction <- reactive({
@@ -278,7 +270,7 @@ cohortExplorerServer <- function(id,
         }
 
       })
-      output$field_picker <- renderUI({
+      output$field_picker_ui <- renderUI({
         req(input$cohort_picker, input$parameter_picker)
         choices <-
           allowed_target[[as.character(
@@ -305,7 +297,7 @@ cohortExplorerServer <- function(id,
       })
 
 
-      output$force_cast <- renderUI({
+      output$force_cast_ui <- renderUI({
         req(input$cohort_picker, input$parameter_picker)
         checkbox_input(
           ns("force_cast"),
@@ -453,7 +445,7 @@ cohortExplorerServer <- function(id,
             if (sum(!is.na(as.numeric(plot_data()$value))) < nrow(plot_data())){
               message_box(
                 "Non-numeric data",
-                paste0("Some value that you're trying to observe is non numeric or null (",round(sum(is.na(as.numeric(plot_data()$value)))/nrow(plot_data()),2)*100,"%). Some function may return error/empty diagram. Ignore this message if this is expected, otherwise, consider using numeric cast"),
+                paste0("Some value that you're trying to observe is non numeric or null (",round(sum(is.na(as.numeric(plot_data()$value)))/nrow(plot_data()),4)*100,"%). Some function may return error/empty diagram. Ignore this message if this is expected, otherwise, consider using numeric cast"),
                 class = "yellow my-10",
                 icon_name = "calculator",
                 closable = T
@@ -545,95 +537,157 @@ cohortExplorerServer <- function(id,
         }
       })
 
+      strat_counter <- reactiveVal(0)
+      co_strat <- list()
+      co_strat[[1]] <- eventSearchbarServer("strat1", database, is_realtime = T)
+      co_strat[[2]] <- eventSearchbarServer("strat2", database, is_realtime = T)
+      co_strat[[3]] <- eventSearchbarServer("strat3", database, is_realtime = T)
+      co_strat[[4]] <- eventSearchbarServer("strat4", database, is_realtime = T)
+      co_strat[[5]] <- eventSearchbarServer("strat5", database, is_realtime = T)
+
+      ui_loaded_once <- reactiveVal(FALSE)
 
       output$plot_strat_form <- renderUI({
         req(input$cohort_picker, plot_data())
-        htmltools::tagAppendAttributes(segment(form(field(
-          checkbox_input(
-            ns("plot_is_stratified"),
-            "Add a stratification",
-            type = "toggle",
-            is_marked = isolate({
-              ifelse(isTruthy(input$plot_is_stratified),
-                     input$plot_is_stratified,
-                     FALSE)
-            })
-          )
-        ), {
-          if (isTruthy(input$plot_is_stratified)) {
+        isolate({
+          segment(
             tagList(
-              tags$h3(tagList(
-                icon(class = "grey id card outline"),
-                tags$div("Demographic Stratification", class = "content")
-              ), class = "ui header"),
-              fields(
-                field(
-                  selectInput(
-                    ns("plot_strat_dem_param"),
-                    label = "Select a static/demographic parameter",
-                    choices = list(
-                      "",
-                      "Gender",
-                      "Age",
-                      "HADM Length",
-                      "In hospital death",
-                      "< 1 year after HADM death"
-                    ),
-                    selected = isolate({
-                      ifelse(
-                        isTruthy(input$plot_strat_dem_param),
-                        input$plot_strat_dem_param,
-                        ""
-                      )
-                    }),
-                  )
-                ),
-                field(
-                  selectInput(
-                    ns("plot_strat_dem_cond"),
-                    label = "Select a condition",
-                    choices = list("==", "<", ">", "EXIST"),
-                    selected = isolate({
-                      ifelse(
-                        isTruthy(input$plot_strat_dem_cond),
-                        input$plot_strat_dem_cond,
-                        "=="
-                      )
-                    }),
-                  )
-                ),
-                field(
-                  labeled_numeric_input(
-                    ns("plot_strat_dem_cond_value"),
-                    label = "Select a value for your condition (optionnal)",
-                    type = "number",
-                    value = isolate({
-                      ifelse(
-                        isTruthy(input$plot_strat_dem_cond_value),
-                        input$plot_strat_dem_cond_value,
-                        ""
-                      )
-                    })
-                  )
+              h3("Add a stratification"),
+              tags$p(
+                "Use stratification to compare outcomes for specific ICU stay populations.",
+                tags$br(),
+                tags$i(
+                  "A stay assigned to a specific stratification n cannot be included in any n+1 other stratification."
                 )
               ),
-              tags$div("OR", class = "ui horizontal divider"),
-              tags$h3(tagList(
-                icon(class = "grey file medical alternate"),
-                tags$div(
-                  "Event based restriction",
-                  div(
-                    "(event based restriction will be applied only if demographic stratification is not set)",
-                    class = "sub header"
-                  ),
-                  class = "content"
+              fields(
+                actionButton(
+                  ns("add_stratification"),
+                  label = icon("plus"),
+                  class = "icon"
+                ),
+                actionButton(
+                  ns("remove_stratification"),
+                  label = icon("minus"),
+                  class = "icon"
                 )
-              ), class = "ui header"),
-              eventSearchbarUI(ns("event_searchbar"))
-            )
-          }
-        })), class = "my-10")
+              ),
+              htmltools::tagAppendAttributes(
+                segment(
+                  "Stratification 1",
+                  textInput(ns("strat1_label"), "Stratification name"),
+                  eventSearchbarUI(ns("strat1")),
+                  class = "red parameter-strat",
+                  strat = "1"),
+                style = if (ui_loaded_once()) "display:none;" else NULL
+              ),
+              htmltools::tagAppendAttributes(
+                segment(
+                  "Stratification 2",
+                  textInput(ns("strat2_label"), "Stratification name"),
+                  eventSearchbarUI(ns("strat2")),
+                  class = "orange parameter-strat",
+                  strat = "2"),
+                style = if (ui_loaded_once()) "display:none;" else NULL
+              ),
+              htmltools::tagAppendAttributes(
+                segment(
+                  "Stratification 3",
+                  textInput(ns("strat3_label"), "Stratification name"),
+                  eventSearchbarUI(ns("strat3")),
+                  class = "yellow parameter-strat",
+                  strat = "3"),
+                style = if (ui_loaded_once()) "display:none;" else NULL
+              ),
+              htmltools::tagAppendAttributes(
+                segment(
+                  "Stratification 4",
+                  textInput(ns("strat4_label"), "Stratification name"),
+                  eventSearchbarUI(ns("strat4")),
+                  class = "olive parameter-strat",
+                  strat = "4"),
+                style = if (ui_loaded_once()) "display:none;" else NULL
+              ),
+              htmltools::tagAppendAttributes(
+                segment(
+                  "Stratification 5",
+                  textInput(ns("strat5_label"), "Stratification name"),
+                  eventSearchbarUI(ns("strat5")),
+                  class = "green parameter-strat",
+                  strat = "5"),
+                style = if (ui_loaded_once()) "display:none;" else NULL
+              ),
+              htmltools::tagAppendAttributes(
+                segment(
+                  "Others",
+                  textInput(ns("others_label"), "Stratification name"),
+                  "Represent the remaining element that does not fit any stratification",
+                  class = "blue parameter-strat others"),
+                style = if (ui_loaded_once()) "display:none;" else NULL
+              ),
+              hidden(text_input(ns(
+                "ui_loaded"
+              ), value = "DOM Ready"))
+            ),
+            class = "my-10"
+          )
+        })
       })
+
+      observeEvent(input$add_stratification, {
+        if (strat_counter() < 5) {
+          strat_counter(strat_counter() + 1)
+        }
+      })
+
+      observeEvent(input$remove_stratification, {
+        if (strat_counter() > 0) {
+          strat_counter(strat_counter() - 1)
+        }
+      })
+
+      last_cohort <- reactiveVal("")
+      observe({
+        req(input$cohort_picker)
+        if(last_cohort() != input$cohort_picker){
+          strat_counter(0)
+          last_cohort(input$cohort_picker)
+        }
+      })
+
+      observe({
+        req(input$ui_loaded)
+        input$ui_loaded
+        runjs(
+          paste0(
+            "
+        var strat_count = ",
+            strat_counter(),
+            ";
+        const elements = document.querySelectorAll('.parameter-strat');
+
+        elements.forEach(element => {
+          const stratValue = parseInt(element.getAttribute('strat'), 10);
+          if (stratValue <= strat_count) {
+            element.style.display = 'block';
+          } else{
+            element.style.display = 'none';
+          }
+        });
+          if (strat_count>0){
+            document.querySelectorAll('.parameter-strat.others')[0].style.display = 'block';
+          } else{
+            document.querySelectorAll('.parameter-strat.others')[0].style.display = 'none';
+
+          }"
+          )
+        )
+        if(!isolate(ui_loaded_once())){
+          ui_loaded_once(TRUE)
+        }
+
+      })
+
       output$plot_clean_form <- renderUI({
         req(input$cohort_picker, plot_data())
         min_value <-
@@ -755,6 +809,102 @@ cohortExplorerServer <- function(id,
       })
 
       unitname <- reactiveVal("None")
+      strat_error_ui <- reactiveVal(NULL)
+
+      apply_condition_object <- function(stay_to_filter,
+                                         condition_object) {
+
+        constraint_list <- condition_object$constraint_list
+        table_count <- length(constraint_list)
+        strat_data <- list()
+        errors <- list()
+
+        if (condition_object$condition_string != "") {
+          for (condition_id in 1:table_count) {
+            key <- paste0("condition_", condition_id)
+            strat_data[[key]] <- tryCatch({
+              dedicated_db_link <- connect_to_mimic()
+              data <- get_constrained_table(
+                dedicated_db_link,
+                constraint_list[[as.character(condition_id)]]$linksto,
+                constraint_list[[as.character(condition_id)]]$constraint,
+                input$cohort_picker
+              ) %>% collect()
+              DBI::dbDisconnect(dedicated_db_link)
+              data
+            }, error = function(e) {
+              tryCatch(DBI::dbDisconnect(dedicated_db_link), error = function(e2) NULL)
+              errors[[key]] <<- conditionMessage(e)
+              NULL
+            })
+          }
+        }
+
+        if (length(errors) > 0) {
+          failed_details <- paste(
+            sapply(names(errors), function(k) paste0("[", k, "] ", errors[[k]])),
+            collapse = "<br>"
+          )
+          error_indices <- sapply(names(errors), function(k) as.integer(gsub("condition_", "", k)))
+          return(list(
+            status = "error",
+            message = failed_details,
+            error_indices = error_indices
+          ))
+        }
+
+        # Check if any condition uses exclusion
+        has_exclusion <- any(sapply(condition_object$constraint_list, function(c) isTRUE(c$constraint$is_exclusion)))
+        universe <- NULL
+        if (has_exclusion) {
+          universe <- dplyr::tbl(database(), in_schema("public", "cohort")) %>%
+            filter(cohort_id == !!input$cohort_picker) %>%
+            select(subject_id, hadm_id, stay_id) %>%
+            collect()
+        }
+        for (key in names(strat_data)) {
+          condition_idx <- gsub("condition_", "", key)
+          data <- strat_data[[key]]
+          if (isTRUE(condition_object$constraint_list[[condition_idx]]$constraint$is_exclusion)) {
+            # Pre-compute complement: stays in universe NOT matching this condition
+            join_by <- if (!("stay_id" %in% names(data)) || is.null(data$stay_id[1])) {
+              c("subject_id", "hadm_id")
+            } else {
+              c("subject_id", "hadm_id", "stay_id")
+            }
+            data <- anti_join(universe, data, by = join_by)
+          }
+          assign(key, data)
+        }
+        escaped_expression <-
+          parsecondition(condition_object$condition_string)
+        expression_to_eval <-
+          gsub("[", "(", escaped_expression, fixed = T)
+        expression_to_eval <-
+          gsub("]", ")", expression_to_eval, fixed = T)
+
+        strat_condition <-
+          eval(parse(text = expression_to_eval))
+        if (is.null(strat_condition)) {
+          strat_condition <- isolate({
+            dplyr::tbl(database(), in_schema("public", "cohort")) %>% filter(cohort_id == !!input$cohort_picker) %>% collect()
+          })
+        }
+
+        icd_filtered_result <- process_icd_filter(database, condition_object, strat_condition)
+        if (sum(is.na(strat_condition$stay_id)) == nrow(strat_condition) ||
+            nchar(condition_object$icd_to_allow) > 0 ||
+            nchar(condition_object$icd_to_deny) > 0) {
+          toast(
+            "",
+            paste0(
+              "Using a out-of-icu event to stratify, stay stratification may be innacurate."
+            ),
+            "yellow"
+          )
+        }
+        intersect(icd_filtered_result$stay_id, stay_to_filter)
+      }
 
       transformed_data <- reactive({
         req(plot_data())
@@ -822,8 +972,9 @@ cohortExplorerServer <- function(id,
 
             # Aggregate data by hour for longitudinal trajectory so stay with more than one data per hour not biases the whole graph
             if (input$plot_type == "Longitudinal trajectory") {
-              aggr_data <- data %>% select(-interval) %>%
-                mutate(interval = hr) %>% group_by(interval, stay_id)
+              aggr_data <- data %>% group_by(interval, stay_id)
+              #select(-interval) %>%
+              #mutate(interval = hr) %>%
             } else{
               aggr_data <- data %>% group_by(interval, stay_id)
             }
@@ -851,173 +1002,106 @@ cohortExplorerServer <- function(id,
           }
 
           progress$set(value = 3, message = 'Stratificating data')
-          if (input$plot_is_stratified &&
-              (isTruthy(condition_object()) |
-               input$plot_strat_dem_param != "")) {
-            if (input$plot_strat_dem_param == "") {
-              user_condition_object <- condition_object()
-              strat_data <-
-                request_constrained(
-                  user_condition_object,
-                  is_synchronous = T,
-                  cohort_filter = input$cohort_picker
-                )
-              for (key in names(strat_data)) {
-                assign(key, strat_data[[key]])
-              }
-              escaped_expression <-
-                parsecondition(user_condition_object$condition_string)
-              expression_to_eval <-
-                gsub("[", "(", escaped_expression, fixed = T)
-              expression_to_eval <-
-                gsub("]", ")", expression_to_eval, fixed = T)
 
-              strat_condition <-
-                eval(parse(text = expression_to_eval))
-              progress$set(value = 4, message = 'Processing ICD filter')
-              if(is.null(strat_condition)){
-                strat_condition <- isolate({dplyr::tbl(database(), in_schema("public", "cohort")) %>% filter(cohort_id == !!input$cohort_picker) %>% collect()})
-              }
+          if (strat_counter() > 0 ) {
 
-              icd_filtered_result <- process_icd_filter(database,user_condition_object,strat_condition)
-              if (sum(is.na(strat_condition$stay_id)) == nrow(strat_condition) || nchar(user_condition_object$icd_to_allow) > 0 || nchar(user_condition_object$icd_to_deny) > 0) {
-                toast(
-                  "",
-                  paste0(
-                    "Using a out-of-icu event to stratify, stay stratification may be innacurate."
-                  ),
-                  "yellow"
-                )
-              }
-              strat_stay <-
-                icd_filtered_result$stay_id
-              aggr_data <-
-                aggr_data %>% mutate(strat = case_when((stay_id %in% strat_stay) ~ "Event condition",
-                                                       .default = "Others"
-                ))
+            cohort <- dplyr::tbl(database(), in_schema("public", "cohort"))
+            d_cohorts <- dplyr::tbl(database(), in_schema("public", "d_cohorts"))
+            demographics <- dplyr::tbl(database(), in_schema("public", "demographics"))
 
-
-            }
-            else{
-              if (isTruthy(condition_object())) {
-                shiny.semantic::toast(
-                  message = paste0(
-                    "<b>Demographic and event based stratification are filled</b><br>
-                                Only demographic stratification will be applied"
-                  ),
-                  class = "warning",
-                  duration = 10
-                )
-              }
-              patients <-
-                dplyr::tbl(database(),
-                           in_schema("mimiciv_hosp", "patients"))
-              admissions <-
-                dplyr::tbl(database(),
-                           in_schema("mimiciv_hosp", "admissions"))
-              icustays <-
-                dplyr::tbl(database(), in_schema("mimiciv_icu", "icustays"))
-              if (input$plot_strat_dem_param == "Gender") {
-                gender_list <-
-                  patients %>% inner_join(icustays, by = "subject_id") %>% select(stay_id, gender) %>% collect()
-                aggr_data <-
-                  aggr_data %>% inner_join(gender_list, by = "stay_id") %>% rename(strat =
-                                                                                     gender)
-
-              } else if (input$plot_strat_dem_param == "Age") {
-                if (!is.numeric(input$plot_strat_dem_cond_value)) {
-                  toast("",
-                        paste0("Expecting an Age value to stratify "),
-                        "red")
-                  progress$close()
-                  return(NULL)
+            aggr_data_pre_strat <- aggr_data
+            aggr_data <- d_cohorts %>%
+              filter(cohort_id == !!input$cohort_picker) %>%
+              inner_join(cohort, by = "cohort_id") %>%
+              mutate(strat = "Whole Cohort") %>%
+              collect() %>%
+              {
+                if (isolate(strat_counter()) > 0) {
+                  stratified_stay_df <- .
+                  strat_errors <- list()
+                  # Clear error classes on all stratification searchbars
+                  for (clear_i in 1:isolate(strat_counter())) {
+                    runjs(paste0(
+                      "$('#", ns(paste0("strat", clear_i)), "-filter-container').find('.ui.label.filter').each(function() {",
+                      "   $(this).removeClass('event-error');",
+                      "});"
+                    ))
+                  }
+                  for (strat_i in 1:isolate(strat_counter())) {
+                    selected_stay <- apply_condition_object((
+                      stratified_stay_df %>% filter(strat == "Whole Cohort")
+                    )$stay_id,co_strat[[strat_i]]())
+                    if (is.list(selected_stay) && identical(selected_stay$status, "error")) {
+                      # Highlight error conditions in this searchbar
+                      if (!is.null(selected_stay$error_indices)) {
+                        error_indices_js <- paste0("[", paste(selected_stay$error_indices, collapse = ","), "]")
+                        runjs(paste0(
+                          "let errIdx", strat_i, " = ", error_indices_js, ";",
+                          "$('#", ns(paste0("strat", strat_i)), "-filter-container').find('.ui.label.filter').each(function(index) {",
+                          "   if (errIdx", strat_i, ".includes(index + 1)) {",
+                          "       $(this).addClass('event-error');",
+                          "   }",
+                          "});"
+                        ))
+                      } else {
+                        # Whole request failed, mark all filters as error
+                        runjs(paste0(
+                          "$('#", ns(paste0("strat", strat_i)), "-filter-container').find('.ui.label.filter').addClass('event-error');"
+                        ))
+                      }
+                      strat_errors[[length(strat_errors) + 1]] <- paste0(
+                        "Stratification ", strat_i, ": ", selected_stay$message
+                      )
+                      next
+                    }
+                    stratified_stay_df <- stratified_stay_df %>% mutate(
+                      strat = ifelse(
+                        stay_id %in% selected_stay,ifelse(
+                          input[[paste0("strat", strat_i, "_label")]] != "",
+                          input[[paste0("strat", strat_i, "_label")]],
+                          paste("Stratification", strat_i)
+                        ) ,
+                        strat
+                      )
+                    )
+                  }
+                  if (length(strat_errors) > 0) {
+                    list(
+                      status = "strat_error",
+                      message = paste(strat_errors, collapse = "<br>")
+                    )
+                  } else {
+                    stratified_stay_df %>% mutate(strat = ifelse(
+                      strat == "Whole Cohort",
+                      ifelse(
+                        input$others_label != "",
+                        input$others_label,
+                        "Others"
+                      ) ,
+                      strat
+                    ))
+                  }
+                } else{
+                  .
                 }
 
-                age_list <- patients %>%
-                  inner_join(icustays, by = "subject_id") %>%
-                  inner_join(admissions, by = "hadm_id") %>%
-                  mutate(age = anchor_age + DATE_PART('year', admittime) - anchor_year) %>%
-                  select(stay_id, age) %>% collect()
-
-                mutate_request <-
-                  paste0(
-                    " case_when(age ",
-                    input$plot_strat_dem_cond,
-                    " ",
-                    input$plot_strat_dem_cond_value,
-                    " ~ '",
-                    input$plot_strat_dem_param,
-                    input$plot_strat_dem_cond,
-                    input$plot_strat_dem_cond_value,
-                    "', .default = 'others')"
-                  )
-                aggr_data <-
-                  aggr_data %>% inner_join(age_list, by = "stay_id") %>% mutate(
-                    strat := !!rlang::parse_quo(mutate_request, env = rlang::caller_env())
-                  )
-
-              } else if (input$plot_strat_dem_param == "HADM Length") {
-                if (!is.numeric(input$plot_strat_dem_cond_value)) {
-                  toast("",
-                        paste0("Expecting an HADM Length value to stratify "),
-                        "red")
-                  progress$close()
-                  return(NULL)
-                }
-
-                stay_length_list <- patients %>%
-                  inner_join(icustays, by = "subject_id") %>%
-                  inner_join(admissions, by = "hadm_id") %>%
-                  mutate(hadm_length = AGE(dischtime, admittime)) %>%
-                  select(stay_id, hadm_length) %>% collect()
-
-                mutate_request <-
-                  paste0(
-                    " case_when(hadm_length ",
-                    input$plot_strat_dem_cond,
-                    " ",
-                    input$plot_strat_dem_cond_value,
-                    " ~ '",
-                    input$plot_strat_dem_param,
-                    input$plot_strat_dem_cond,
-                    input$plot_strat_dem_cond_value,
-                    "', .default = 'others')"
-                  )
-                aggr_data <-
-                  aggr_data %>% inner_join(stay_length_list, by = "stay_id") %>% mutate(
-                    strat := !!rlang::parse_quo(mutate_request, env = rlang::caller_env())
-                  )
-
-              } else if (input$plot_strat_dem_param == "In hospital death") {
-                in_hosp_death_list <- patients %>%
-                  inner_join(icustays, by = "subject_id") %>%
-                  inner_join(admissions, by = "hadm_id") %>%
-                  mutate(
-                    in_hosp_death = case_when(
-                      dischtime + days(1) >= dod ~ "In hospital death",
-                      .default = "Others"
-                    )
-                  ) %>%
-                  select(stay_id, in_hosp_death) %>% collect()
-                aggr_data <-
-                  aggr_data %>% inner_join(in_hosp_death_list, by = "stay_id") %>% rename(strat =
-                                                                                            in_hosp_death)
-              } else if (input$plot_strat_dem_param == "< 1 year after HADM death") {
-                one_y_after_hosp_death_list <- patients %>%
-                  inner_join(icustays, by = "subject_id") %>%
-                  inner_join(admissions, by = "hadm_id") %>%
-                  mutate(
-                    one_y_after_hosp_death = case_when(
-                      dischtime + years(1) >= dod ~ "< 1 year after HADM death",
-                      .default = "Others"
-                    )
-                  ) %>%
-                  select(stay_id, one_y_after_hosp_death) %>% collect()
-                aggr_data <-
-                  aggr_data %>% inner_join(one_y_after_hosp_death_list, by = "stay_id") %>% rename(strat =
-                                                                                                     one_y_after_hosp_death)
               }
+            if (is.list(aggr_data) && identical(aggr_data$status, "strat_error")) {
+              progress$close()
+              strat_error_ui(message_box(
+                "An error has occured",
+                HTML(paste0(
+                  "The following stratification(s) failed:<br><code>",
+                  aggr_data$message,
+                  "</code>"
+                )),
+                class = "negative my-10",
+                closable = TRUE
+              ))
+              return(NULL)
             }
+            strat_error_ui(NULL)
+            aggr_data <- inner_join(aggr_data, aggr_data_pre_strat, by = "stay_id")
           } else{
             aggr_data <- aggr_data %>% mutate(strat = interval)
           }
@@ -1060,7 +1144,7 @@ cohortExplorerServer <- function(id,
 
       user_plot <-
         eventReactive(input$plot_button, {
-          req(input$cohort_picker,
+          req(strat_counter(),
               input$plot_type,
               transformed_data())
           labely <-
@@ -1073,9 +1157,7 @@ cohortExplorerServer <- function(id,
           labelx <- "Time interval in hour"
           graph_color_palette <-
             RColorBrewer::brewer.pal(8, "Set2")
-          if (input$plot_is_stratified &&
-              (isTruthy(condition_object()) |
-               input$plot_strat_dem_param != "")) {
+          if (strat_counter() > 0) {
                 if(n_distinct(transformed_data()$strat)>1){
                   is_stratification_valid <- T
                 } else{
@@ -1093,6 +1175,7 @@ cohortExplorerServer <- function(id,
             is_stratification_valid <- F
           }
           suppressWarnings({
+            print(transformed_data())
             if (input$plot_type == "Longitudinal trajectory") {
               labelx <- "Time in hour"
               strat_count <-
@@ -1236,9 +1319,7 @@ cohortExplorerServer <- function(id,
         ))))
       })
 
-      observeEvent(input$reset_data_desc_button, {
-        clinical_data_list(list())
-      })
+
 
       observe({
         req(input$cohort_picker)
@@ -1265,9 +1346,7 @@ cohortExplorerServer <- function(id,
           icustays <-
             dplyr::tbl(database(), in_schema("mimiciv_icu", "icustays"))
 
-          if (input$plot_is_stratified &&
-              (isTruthy(condition_object()) |
-               input$plot_strat_dem_param != "")) {
+          if (strat_counter() > 0) {
             if(n_distinct(transformed_data()$strat)>1){
               is_stratification_valid <- T
             } else{
@@ -1279,137 +1358,98 @@ cohortExplorerServer <- function(id,
           }
           if (is_stratification_valid) {
             strats <- levels(as.factor(transformed_data()$strat))
-            stratA <- strats[1]
-            stratB <- strats[2]
+            strat_names <- strats
 
-            stay_id_A <-
-              unique((transformed_data() %>% filter(strat == stratA))$stay_id)
-            stay_id_B <-
-              unique((transformed_data() %>% filter(strat == stratB))$stay_id)
+            # Compute per-strat stay_ids and table_stays
+            stay_id_list <- lapply(strats, function(s) {
+              unique((transformed_data() %>% filter(strat == s))$stay_id)
+            })
+            names(stay_id_list) <- strats
+
+            table_stay_list <- lapply(strats, function(s) {
+              copy_inline(database(),
+                          as_tibble(list(stay_id = stay_id_list[[s]])),
+                          types = c(stay_id = "bigint"))
+            })
+            names(table_stay_list) <- strats
+
+            # Stay count
             stratification_summary <-
-              list("Stay count" = list(length(stay_id_A), length(stay_id_B)))
+              list("Stay count" = lapply(strats, function(s) length(stay_id_list[[s]])))
 
-            table_stay_A <-
-              copy_inline(database(),
-                          as_tibble(list(stay_id = stay_id_A)),
-                          types = c(stay_id = "bigint"))
-            table_stay_B <-
-              copy_inline(database(),
-                          as_tibble(list(stay_id = stay_id_B)),
-                          types = c(stay_id = "bigint"))
-
-
-            sex_count_A <-
-              table_stay_A %>% inner_join(icustays, by = "stay_id") %>% inner_join(patients, by =
-                                                                                     "subject_id") %>%
-              select(subject_id, gender) %>% distinct() %>% group_by(gender) %>% count() %>% collect() %>%
-              pivot_wider(names_from = gender, values_from = n) %>% mutate_if(is.numeric, as.integer)
-            sex_count_B <-
-              table_stay_B %>% inner_join(icustays, by = "stay_id") %>% inner_join(patients, by =
-                                                                                     "subject_id") %>%
-              select(subject_id, gender) %>% distinct() %>% group_by(gender) %>% count() %>% collect() %>%
-              pivot_wider(names_from = gender, values_from = n) %>% mutate_if(is.numeric, as.integer)
-            sex_ratio_A <-
-              sex_ratio_to_sex_count(sex_count_A)
-            sex_ratio_B <-
-              sex_ratio_to_sex_count(sex_count_B)
+            # Sex Ratio
+            sex_ratios <- lapply(strats, function(s) {
+              sex_count <-
+                table_stay_list[[s]] %>% inner_join(icustays, by = "stay_id") %>% inner_join(patients, by =
+                                                                                       "subject_id") %>%
+                select(subject_id, gender) %>% distinct() %>% group_by(gender) %>% count() %>% collect() %>%
+                pivot_wider(names_from = gender, values_from = n) %>% mutate_if(is.numeric, as.integer)
+              sex_ratio_to_sex_count(sex_count)
+            })
             stratification_summary <-
               append(stratification_summary,
-                     list("Sex Ratio (M/F)" = list(sex_ratio_A, sex_ratio_B)))
+                     list("Sex Ratio (M/F)" = sex_ratios))
 
-            age_mean_A <-
+            # Mean Age
+            age_means <- lapply(strats, function(s) {
               (
-                table_stay_A %>% inner_join(icustays, by = "stay_id") %>% inner_join(patients, by =
+                table_stay_list[[s]] %>% inner_join(icustays, by = "stay_id") %>% inner_join(patients, by =
                                                                                        "subject_id") %>%
                   mutate(age = anchor_age + DATE_PART('year', intime) - anchor_year) %>%
                   summarise(mean_age = mean(age)) %>% mutate(mean_age = round(mean_age, 2)) %>% collect()
               )$mean_age
-            age_mean_B <-
-              (
-                table_stay_B %>% inner_join(icustays, by = "stay_id") %>% inner_join(patients, by =
-                                                                                       "subject_id") %>%
-                  mutate(age = anchor_age + DATE_PART('year', intime) - anchor_year) %>%
-                  summarise(mean_age = mean(age)) %>% mutate(mean_age = round(mean_age, 2)) %>% collect()
-              )$mean_age
-
+            })
             stratification_summary <-
-              append(stratification_summary, list("Mean Age" = list(age_mean_A, age_mean_B)))
+              append(stratification_summary, list("Mean Age" = age_means))
 
-            mean_stay_A <-
+            # Mean Stay Length
+            mean_stays <- lapply(strats, function(s) {
               (
-                table_stay_A %>% inner_join(icustays, by = "stay_id") %>%
+                table_stay_list[[s]] %>% inner_join(icustays, by = "stay_id") %>%
                   mutate(stay_length = AGE(outtime, intime)) %>%
                   summarise(
                     mean_stay = sql('AVG(EXTRACT(EPOCH FROM "stay_length")/86400)')
                   ) %>% mutate(mean_stay = round(mean_stay, 2)) %>% collect()
               )$mean_stay
-            mean_stay_B <-
-              (
-                table_stay_B %>% inner_join(icustays, by = "stay_id") %>%
-                  mutate(stay_length = AGE(outtime, intime)) %>%
-                  summarise(
-                    mean_stay = sql('AVG(EXTRACT(EPOCH FROM "stay_length")/86400)')
-                  ) %>% mutate(mean_stay = round(mean_stay, 2)) %>% collect()
-              )$mean_stay
-
+            })
             stratification_summary <-
               append(stratification_summary,
-                     list(
-                       "Mean Stay Length (in days)" = list(mean_stay_A, mean_stay_B)
-                     ))
+                     list("Mean Stay Length (in days)" = mean_stays))
 
-            d_percentage_A <-
-              (
-                table_stay_A %>% inner_join(icustays, by = "stay_id") %>% inner_join(admissions, by =
+            # % of death in Hospital
+            d_percentages <- lapply(strats, function(s) {
+              d_pct <- (
+                table_stay_list[[s]] %>% inner_join(icustays, by = "stay_id") %>% inner_join(admissions, by =
                                                                                        c("subject_id", "hadm_id")) %>% inner_join(patients, by = "subject_id") %>%
                   mutate(death = as.integer(dod <= dischtime + days(1))) %>%
                   summarise(
                     d_percentage = sql('COALESCE(SUM("death"),0) / COUNT(*)::float * 100')
                   ) %>% mutate(d_percentage = round(d_percentage, 2)) %>% collect()
               )$d_percentage
-            d_percentage_B <-
-              (
-                table_stay_B %>% inner_join(icustays, by = "stay_id") %>% inner_join(admissions, by =
-                                                                                       c("subject_id", "hadm_id")) %>% inner_join(patients, by = "subject_id") %>%
-                  mutate(death = as.integer(dod <= dischtime + days(1))) %>%
-                  summarise(
-                    d_percentage = sql('COALESCE(SUM("death"),0) / COUNT(*)::float * 100')
-                  ) %>% mutate(d_percentage = round(d_percentage, 2)) %>% collect()
-              )$d_percentage
+              paste0(d_pct, "%")
+            })
             stratification_summary <-
               append(stratification_summary,
-                     list("% of death in Hospital" = list(
-                       paste0(d_percentage_A, "%"),
-                       paste0(d_percentage_B, "%")
-                     )))
+                     list("% of death in Hospital" = d_percentages))
 
-            d30_percentage_A <-
-              (
-                table_stay_A %>% inner_join(icustays, by = "stay_id") %>% inner_join(admissions, by =
+            # 30-day mortality
+            d30_percentages <- lapply(strats, function(s) {
+              d30_pct <- (
+                table_stay_list[[s]] %>% inner_join(icustays, by = "stay_id") %>% inner_join(admissions, by =
                                                                                        c("subject_id", "hadm_id")) %>% inner_join(patients, by = "subject_id") %>%
                   mutate(death = as.integer(dod <= intime + days(30))) %>%
                   summarise(
                     d_percentage = sql('COALESCE(SUM("death"),0) / COUNT(*)::float * 100')
                   ) %>% mutate(d_percentage = round(d_percentage, 2)) %>% collect()
               )$d_percentage
-            d30_percentage_B <-
-              (
-                table_stay_B %>% inner_join(icustays, by = "stay_id") %>% inner_join(admissions, by =
-                                                                                       c("subject_id", "hadm_id")) %>% inner_join(patients, by = "subject_id") %>%
-                  mutate(death = as.integer(dod <= intime + days(30))) %>%
-                  summarise(
-                    d_percentage = sql('COALESCE(SUM("death"),0) / COUNT(*)::float * 100')
-                  ) %>% mutate(d_percentage = round(d_percentage, 2)) %>% collect()
-              )$d_percentage
+              paste0(d30_pct, "%")
+            })
             stratification_summary <-
               append(stratification_summary,
-                     list("After ICU admission 30-day mortality" = list(
-                       paste0(d30_percentage_A, "%"),
-                       paste0(d30_percentage_B, "%")
-                     )))
+                     list("After ICU admission 30-day mortality" = d30_percentages))
           } else{
-            stratA <-
-              "Whole cohort (with data for this parameter in this time windows)"
+            strat_names <-
+              c("Whole cohort (with data for this parameter in this time windows)")
             stay_ids <-
               unique((transformed_data()$stay_id))
             stratification_summary <-
@@ -1497,25 +1537,27 @@ cohortExplorerServer <- function(id,
             icon(class = "grey search"),
             tags$div("Stratification Details", class = "content")
           ), class = "ui header"),
-          tags$table(tags$thead(tags$tr(
-            tags$th(), tags$th(label(stratA, class = "")), {
-              if (is_stratification_valid)
-                tags$th(label(stratB, class = ""))
-            }
-
-          ), ), tags$tbody(lapply(names(stratification_summary), function(name) {
-            tags$tr(tags$th(name),
-                    tags$td(stratification_summary[[name]][1]),
-                    {
-                      if (is_stratification_valid)
-                        tags$td(stratification_summary[[name]][2])
-                    })
-          })), class = "ui very basic collapsing celled table"),
+          tags$table(
+            tags$thead(tags$tr(
+              tags$th(),
+              lapply(strat_names, function(s) tags$th(label(s, class = "")))
+            )),
+            tags$tbody(lapply(names(stratification_summary), function(name) {
+              tags$tr(
+                tags$th(name),
+                lapply(seq_along(strat_names), function(i) {
+                  tags$td(stratification_summary[[name]][[i]])
+                })
+              )
+            })),
+            class = "ui very basic collapsing celled table"
+          ),
           class = "my-10"
         )
       })
 
       output$graph_render <- renderUI({
+        if (!is.null(strat_error_ui())) return(strat_error_ui())
         req(input$cohort_picker, user_plot())
         if (input$plot_type %in% list("Longitudinal trajectory","Pie (categorical)")) {
           user_plot()
@@ -1541,17 +1583,6 @@ cohortExplorerServer <- function(id,
                       let plot_timestep_input = $('#",
           ns("plot_timestep"),
           "');
-                      console.log(plot_type)
-                      if(plot_type == 'Longitudinal trajectory'){
-                        console.log(plot_timestep_input.attr('disabled','disabled'))
-                        plot_timestep_input.attr('disabled','disabled');
-                        plot_timestep_input.val('1');
-                        plot_timestep_input.parent().attr('data-tooltip','Longitudinal trajectory plot type need a timestep equal to 1');
-                        plot_timestep_input.parent().attr('data-position','right center');
-                      }else{
-                        plot_timestep_input.removeAttr('disabled');
-                      plot_timestep_input.parent().removeAttr('data-tooltip');
-                      }
                     });
                      $('body').on('click', '#refresh-cohort-picker',function(){
                     Shiny.setInputValue('update_profile', Date.now());

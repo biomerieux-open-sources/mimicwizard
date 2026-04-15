@@ -1204,103 +1204,6 @@ AS SELECT 1000000 + row_number() OVER (ORDER BY q01.drug) AS itemid,
           ORDER BY prescriptions.drug) q01
 WITH DATA;
 
--- public.static_distinct_events source
-
-CREATE MATERIALIZED VIEW public.static_distinct_events
-TABLESPACE pg_default
-AS SELECT cq.itemid,
-    cq.label,
-    cq.category,
-    cq.linksto,
-    cq.param_type
-   FROM ( SELECT DISTINCT d_items.itemid,
-            d_items.label,
-            d_items.linksto,
-            d_items.category,
-            d_items.param_type
-           FROM mimiciv_icu.d_items
-          WHERE d_items.linksto::text = 'procedureevents'::text
-        UNION ALL
-         SELECT DISTINCT d_items.itemid,
-            d_items.label,
-            d_items.linksto,
-            d_items.category,
-            d_items.param_type
-           FROM mimiciv_icu.d_items
-          WHERE d_items.linksto::text = 'ingredientevents'::text
-        UNION ALL
-         SELECT DISTINCT d_items.itemid,
-            d_items.label,
-            d_items.linksto,
-            d_items.category,
-            d_items.param_type
-           FROM mimiciv_icu.d_items
-          WHERE d_items.linksto::text = 'inputevents'::text
-        UNION ALL
-         SELECT DISTINCT d_items.itemid,
-            d_items.label,
-            d_items.linksto,
-            d_items.category,
-            d_items.param_type
-           FROM mimiciv_icu.d_items
-          WHERE d_items.linksto::text = 'outputevents'::text
-        UNION ALL
-         SELECT DISTINCT d_items.itemid,
-            d_items.label,
-            d_items.linksto,
-            d_items.category,
-            d_items.param_type
-           FROM mimiciv_icu.d_items
-          WHERE d_items.linksto::text = 'datetimeevents'::text
-        UNION ALL
-         SELECT DISTINCT d_items.itemid,
-            d_items.label,
-            d_items.linksto,
-            d_items.category,
-            d_items.param_type
-           FROM mimiciv_icu.d_items
-          WHERE d_items.linksto::text = 'chartevents'::text
-        UNION ALL
-         SELECT DISTINCT d_labitems.itemid,
-            d_labitems.label,
-            'labevents'::text AS linksto,
-            d_labitems.category,
-            d_labitems.fluid AS param_type
-           FROM mimiciv_hosp.d_labitems
-        UNION ALL
-         SELECT DISTINCT microbiologyresultsevents.itemid,
-            microbiologyresultsevents.label,
-            'microbiologyresultsevents'::text AS linksto,
-            'Microbiology'::text AS category,
-            NULL::character(1) AS param_type
-           FROM public.microbiologyresultsevents
-        UNION ALL
-         SELECT DISTINCT d_prescriptions.itemid,
-            d_prescriptions.drug AS label,
-            'prescriptions'::text AS linksto,
-            'Prescriptions'::text AS category,
-            NULL::character(1) AS param_type
-           FROM public.d_prescriptions) cq
-WITH DATA;
-
--- public.distinct_events source
-
-CREATE OR REPLACE VIEW public.distinct_events
-AS SELECT sde.itemid,
-    sde.label,
-    sde.category,
-    sde.linksto,
-    sde.param_type
-   FROM public.static_distinct_events sde
-UNION ALL
- SELECT dc.itemid,
-    dc.label,
-    'User imported'::character varying AS category,
-    'customevents'::character varying AS linksto,
-    dc.author AS param_type
-   FROM public.d_customevents dc;
-
-
 -- public.demographics source
 
 CREATE MATERIALIZED VIEW public.demographics
@@ -1403,7 +1306,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    i.intime AS charttime,
+    i.outtime AS charttime,
     9 AS itemid,
     'Length of ICU Stay (LIS)'::text AS label,
     ceil(date_part('epoch'::text, i.outtime - i.intime) / 3600::double precision)::text AS value,
@@ -1424,7 +1327,11 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    i.outtime AS charttime,
+    ( SELECT ih.endtime
+           FROM mimiciv_derived.icustay_hourly ih
+          WHERE ih.stay_id = i.stay_id
+          ORDER BY ih.stay_id, ih.hr DESC
+         LIMIT 1) AS charttime,
     11 AS itemid,
     'Death in ICU'::text AS label,
         CASE
@@ -1439,7 +1346,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    i.outtime AS charttime,
+    admissions.dischtime AS charttime,
     12 AS itemid,
     'Death in Hospital'::text AS label,
         CASE
@@ -1480,9 +1387,143 @@ UNION
    FROM mimiciv_icu.icustays i
      JOIN mimiciv_hosp.admissions USING (subject_id, hadm_id)
      JOIN mimiciv_hosp.patients USING (subject_id)
+UNION
+ SELECT i.subject_id,
+    i.hadm_id,
+    i.stay_id,
+    i.intime AS charttime,
+    15 AS itemid,
+    'ICU admission count'::text AS label,
+    (( SELECT count(*) AS count
+           FROM mimiciv_icu.icustays icu
+          WHERE icu.hadm_id = i.hadm_id AND icu.intime <= i.intime))::text AS value,
+    ''::text AS valueuom
+   FROM mimiciv_icu.icustays i
+     JOIN mimiciv_hosp.admissions USING (subject_id, hadm_id)
+     JOIN mimiciv_hosp.patients USING (subject_id)
 WITH DATA;
 
 -- View indexes:
 CREATE INDEX demographics_itemid_idx ON public.demographics USING btree (itemid);
 CREATE INDEX demographics_stay_id_idx ON public.demographics USING btree (stay_id);
 CREATE INDEX demographics_subject_id_idx ON public.demographics USING btree (subject_id, hadm_id, stay_id);
+-- public.static_distinct_events source
+
+CREATE MATERIALIZED VIEW public.static_distinct_events
+TABLESPACE pg_default
+AS SELECT itemid,
+    label,
+    category,
+    linksto,
+    param_type,
+    unitname
+   FROM ( SELECT DISTINCT d_items.itemid,
+            d_items.label,
+            d_items.linksto,
+            d_items.category,
+            d_items.param_type,
+            d_items.unitname
+           FROM mimiciv_icu.d_items
+          WHERE d_items.linksto::text = 'procedureevents'::text
+        UNION ALL
+         SELECT DISTINCT d_items.itemid,
+            d_items.label,
+            d_items.linksto,
+            d_items.category,
+            d_items.param_type,
+            d_items.unitname
+           FROM mimiciv_icu.d_items
+          WHERE d_items.linksto::text = 'ingredientevents'::text
+        UNION ALL
+         SELECT DISTINCT d_items.itemid,
+            d_items.label,
+            d_items.linksto,
+            d_items.category,
+            d_items.param_type,
+            d_items.unitname
+           FROM mimiciv_icu.d_items
+          WHERE d_items.linksto::text = 'inputevents'::text
+        UNION ALL
+         SELECT DISTINCT d_items.itemid,
+            d_items.label,
+            d_items.linksto,
+            d_items.category,
+            d_items.param_type,
+            d_items.unitname
+           FROM mimiciv_icu.d_items
+          WHERE d_items.linksto::text = 'outputevents'::text
+        UNION ALL
+         SELECT DISTINCT d_items.itemid,
+            d_items.label,
+            d_items.linksto,
+            d_items.category,
+            d_items.param_type,
+            d_items.unitname
+           FROM mimiciv_icu.d_items
+          WHERE d_items.linksto::text = 'datetimeevents'::text
+        UNION ALL
+         SELECT DISTINCT d_items.itemid,
+            d_items.label,
+            d_items.linksto,
+            d_items.category,
+            d_items.param_type,
+            d_items.unitname
+           FROM mimiciv_icu.d_items
+          WHERE d_items.linksto::text = 'chartevents'::text
+        UNION ALL
+         SELECT DISTINCT d_labitems.itemid,
+            d_labitems.label,
+            'labevents'::text AS linksto,
+            d_labitems.category,
+            d_labitems.fluid AS param_type,
+            ( SELECT l.valueuom
+                   FROM mimiciv_hosp.labevents l
+                  WHERE d_labitems.itemid = l.itemid
+                 LIMIT 1) AS unitname
+           FROM mimiciv_hosp.d_labitems
+        UNION ALL
+         SELECT DISTINCT microbiologyresultsevents.itemid,
+            microbiologyresultsevents.label,
+            'microbiologyresultsevents'::text AS linksto,
+            'Microbiology'::text AS category,
+            NULL::character(1) AS param_type,
+            NULL::character(1) AS unitname
+           FROM public.microbiologyresultsevents
+        UNION ALL
+         SELECT DISTINCT d_prescriptions.itemid,
+            d_prescriptions.drug AS label,
+            'prescriptions'::text AS linksto,
+            'Prescriptions'::text AS category,
+            NULL::character(1) AS param_type,
+            NULL::character(1) AS unitname
+           FROM public.d_prescriptions
+        UNION ALL
+         SELECT DISTINCT demographics.itemid,
+            demographics.label,
+            'demographics'::text AS linksto,
+            'Demographics'::text AS category,
+            demographics.valueuom AS param_type,
+            ( SELECT de.valueuom
+                   FROM public.demographics de
+                  WHERE demographics.itemid = de.itemid
+                 LIMIT 1) AS unitname
+           FROM public.demographics demographics) cq
+WITH DATA;
+
+-- public.distinct_events source
+
+CREATE OR REPLACE VIEW public.distinct_events
+AS SELECT sde.itemid,
+    sde.label,
+    sde.category,
+    sde.linksto,
+    sde.param_type
+   FROM public.static_distinct_events sde
+UNION ALL
+ SELECT dc.itemid,
+    dc.label,
+    'User imported'::character varying AS category,
+    'customevents'::character varying AS linksto,
+    dc.author AS param_type
+   FROM public.d_customevents dc;
+

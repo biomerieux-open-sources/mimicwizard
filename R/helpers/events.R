@@ -169,6 +169,8 @@ labevents_to_html <- function(item_data){
 microbiologyevents_to_html <- function(item_data){
   tags$div(tags$div(tags$b("Test ID : "),item_data[["test_itemid"]]),
            tags$div(tags$b("Test Name : "),item_data[["test_name"]]),
+           tags$div(tags$b("Chart time : "),item_data[["charttime"]]),
+           tags$div(tags$b("Store time : "),item_data[["storetime"]]),
            tags$div(tags$b("Specimen Tested : "),item_data[["spec_type_desc"]]),
            tags$div(tags$b("Detected Organism ID : "),item_data[["org_itemid"]]),
            tags$div(tags$b("Detected Organism : "),item_data[["org_name"]]),

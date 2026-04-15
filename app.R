@@ -71,7 +71,7 @@ ui <- tagList({
         class = "title",
         icon("hat wizard"),
         span("MIMICWizard"),
-        tags$small("0.8"),
+        tags$small("1.0"),
         div("A MIMIC-IV explorer for non technical users", class = "subtitle")
       ),
       div(
@@ -110,7 +110,7 @@ ui <- tagList({
     title = tags$span(
       icon("hat wizard"),
       "MIMIC Wizard",
-      tags$small("0.8", style = "font-size:0.5em")
+      tags$small("1.0", style = "font-size:0.5em")
     ),
     center = uiOutput("demo_top_label"),
     right = tagList(
@@ -181,10 +181,13 @@ ui <- tagList({
       tags$style(
         HTML(
           ".mt-10{
-      margin-top:10px;
+      margin-top:10px!important;
       }
       .my-10{
       margin:1em 0 !important;
+      }
+      .my-20{
+      margin:2em 0 !important;
       }
       .mb-10{
       margin-bottom:1em;
@@ -199,7 +202,7 @@ ui <- tagList({
       float:right;
       }
       .ui.label.filter {
-      margin-right: 5px;
+      margin: 0 5px;
       }
     .white{
     color:#fff;
@@ -406,6 +409,14 @@ ui <- tagList({
   .lds-ring div {
     border-color: #0dc5c1 transparent transparent transparent;
   }
+  .label.event-error{
+    border: 3px orange solid !important;
+  }
+    .label.event-error:before{
+      content: '⚠️';
+    position: relative;
+    left: 0px;
+  }
 
     "
         )
@@ -424,15 +435,14 @@ ui <- tagList({
   )
 ))
 
-w <- Waiter$new(html = "Loading...", color = "rgb(0,163,156)")
+
 
 server <- function(input, output, session) {
 
-
-  DATABASE_CREATED <- FALSE
-
+  w <- Waiter$new(html = "Loading...", color = "rgb(0,163,156)")
+  DATABASE_CREATED <- reactiveVal(FALSE)
   session_db <- function(w=NULL,init_func=FALSE) {
-    if(xor(DATABASE_CREATED,init_func)){
+    if(xor(DATABASE_CREATED(),init_func)){
       tryCatch({
         DBI::dbListTables(session$userData$database_keepalive)
       }, error = function(e) {
@@ -480,17 +490,22 @@ server <- function(input, output, session) {
       input$run_hosted
       1
     }, {
+
       if (input$init_demo) {
+        w$show()
         "INIT_DEMO"
       } else if (input$run_demo) {
+        w$show()
         "DEMO"
       } else if (input$run_hosted) {
+        w$show()
         "HOSTED"
       }
 
     })
   } else{
     application_mode <- reactive(CONFIG$APPLICATION_MODE)
+    w$show()
   }
 
 
@@ -500,7 +515,6 @@ server <- function(input, output, session) {
   observe({
   if (CONFIG$INTERACTIVE) {
     req(application_mode())
-    w$show()
     if (application_mode() == "INIT_DEMO" ||
         application_mode() == "DEMO") {
       CONFIG$DATABASE_MODE <<- "DEMO"
@@ -510,9 +524,11 @@ server <- function(input, output, session) {
     CONFIG$APPLICATION_MODE <<- application_mode()
     hide("introduction")
     tryCatch({
-      session$userData$database_keepalive <- connect_to_mimic(w)
-      if (CONFIG$APPLICATION_MODE == "INIT_DEMO" && DATABASE_CREATED == FALSE) {
-
+      if (CONFIG$APPLICATION_MODE == "INIT_DEMO" && isolate(DATABASE_CREATED()) == FALSE) {
+        session$userData$database_keepalive <- connect_to_mimic(w)
+        if (!dir.exists("demo")) {
+          stop("Demo folder not found. Please ensure the 'demo' folder exists in the application directory.")
+        }
         create_demo_data_structure(session_db)
         define_postgres_function(session_db)
         w$update(html = tagList(
@@ -534,7 +550,8 @@ server <- function(input, output, session) {
           )
         )
       }
-      DATABASE_CREATED <<- TRUE
+      session$userData$database_keepalive <- connect_to_mimic(w)
+      DATABASE_CREATED(TRUE)
     }, error = function(e) {
       w$update(html = tagList(
         span(
@@ -549,10 +566,13 @@ server <- function(input, output, session) {
     })
   } else{
     hide("introduction")
-    w$show()
+    #w$show()
     tryCatch({
       session$userData$database_keepalive <- connect_to_mimic(w)
-      if (CONFIG$APPLICATION_MODE == "INIT_DEMO" && DATABASE_CREATED == FALSE) {
+      if (CONFIG$APPLICATION_MODE == "INIT_DEMO" && isolate(DATABASE_CREATED()) == FALSE) {
+        if (!dir.exists("demo")) {
+          stop("Demo folder not found. Please ensure the 'demo' folder exists in the application directory.")
+        }
         create_demo_data_structure(session_db)
         define_postgres_function(session_db)
         w$update(html = tagList(
@@ -574,7 +594,7 @@ server <- function(input, output, session) {
           )
         )
       }
-      DATABASE_CREATED <<- TRUE
+      DATABASE_CREATED(TRUE)
     }, error = function(e) {
       w$update(html = tagList(
         span(
@@ -676,12 +696,11 @@ server <- function(input, output, session) {
                             session_db)
       w$hide()
     } else{
-      req(application_mode())
-      if(isTruthy(isolate(session_db(w)))){
+      req(application_mode(),DATABASE_CREATED())
+      if(isTruthy(isolate(session_db())) && DATABASE_CREATED()){
         tryCatchLog({
           print("Loading server")
           print(CONFIG)
-
 
           ####
           #     LOAD DISTRIBUTED API IN THE APP

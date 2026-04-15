@@ -1,5 +1,6 @@
 andcondition <- function(tibblea,tibbleb=NULL){
   if(is.null(tibbleb)) return(tibblea)
+
   if(!("stay_id" %in% names(tibblea)) | is.null(tibblea$stay_id[1])){
     tibblea %>% select(!c(stay_id)) %>%
       inner_join(tibbleb, by = c("subject_id","hadm_id"))

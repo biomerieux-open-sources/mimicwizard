@@ -71,7 +71,6 @@ import_demo_data <- function(database, waiter) {
       )
     ))
   }
-
 }
 
 getSQL <- function(filepath){
@@ -198,7 +197,12 @@ connect_to_mimic <- function(waiter = NULL) {
       user = CONFIG$DEMO_USER,
       password = CONFIG$DEMO_PASSWORD
     )
-
+    if(!is.null(waiter)){
+      waiter$update(html = tagList(
+        spin_pixel(),
+        "Connected ! Starting app..."
+      ))
+    }
     demo_database
   }
   else{
@@ -306,21 +310,20 @@ query_generator <-
         where <- paste0(field, " = ", get_param(1))
       } else if (constraint == "Is False") {
         where <- paste0(field, " = ", get_param(0))
+      } else if (constraint %in% c("=", "<>", "<", ">", "<=", ">=")) {
+        # Handle numeric interpretation
+        field_numeric <- paste0(
+          "CASE WHEN ", field,
+          " ~ E'^[+-]?([0-9]*[.])?[0-9]+$' THEN ",
+          field, "::numeric ELSE NULL END"
+        )
+        extended_field <- get_aggregate_having_clause(field_numeric, aggr, database)
+        operator <- constraint
+        # Replace comma with dot for numeric values if needed
+        value <- gsub(",", ".", value)
+        where <- paste0(extended_field, " ", operator, " ", get_param(value))
       } else {
         stop(paste(constraint," is an unknown constraint for text column"))
-      }
-
-      # Handle numeric interpretation
-      field_numeric <- paste0(
-        "CASE WHEN ", field,
-        " ~ E'^[+-]?([0-9]*[.])?[0-9]+$' THEN ",
-        field, "::numeric ELSE NULL END"
-      )
-
-      extended_field <- get_aggregate_having_clause(field_numeric, aggr, database)
-      if (constraint %in% c("=", "<>", "<", ">", "<=", ">=")) {
-        operator <- constraint
-        where <- paste0(extended_field, " ", operator, " ", get_param(value))
       }
 
     } else {
@@ -334,6 +337,8 @@ query_generator <-
         where <- paste0(extended_field, " = ", get_param(0))
       } else if (constraint %in% c("=", "<>", "<", ">", "<=", ">=")) {
         operator <- constraint
+        # Replace comma with dot for numeric values if needed
+        value <- gsub(",", ".", value)
         where <- paste0(extended_field, " ", operator, " ", get_param(value))
       } else {
         stop(paste(constraint," is an unknown constraint for numeric column (",extended_field,"). Please use a numeric constraint."))
@@ -345,7 +350,7 @@ query_generator <-
     icu_time_where <- ""
 
     if (time_constraint$is_time_constrained == TRUE) {
-      if (schema %in% c("mimiciv_hosp", "public")) {
+      if (schema %in% c("mimiciv_hosp", "public") && linksto != "demographics") {
         icu_time_join <- paste0(
           " JOIN (SELECT stay_id, hr, endtime - interval '1 hour' AS starttime, endtime FROM mimiciv_derived.icustay_hourly ih) ih
           ON (i.stay_id = ih.stay_id AND t.", event_time_target[[linksto]], " BETWEEN ih.starttime AND ih.endtime) "
@@ -360,11 +365,11 @@ query_generator <-
       icu_time_where <- paste0(" AND ih.hr BETWEEN ", get_param(time_constraint$time_min), " AND ", get_param(time_constraint$time_max))
     }
 
-    ## --- Cohort filter
+    ## --- Cohort filtering
     cohort_join <- ""
     cohort_where <- ""
     if (!is.null(cohort_filter)) {
-      if (schema %in% c("mimiciv_hosp", "public")) {
+      if (schema %in% c("mimiciv_hosp", "public") && linksto != "demographics") {
         cohort_join <- " JOIN public.cohort c ON (c.subject_id = i.subject_id AND c.hadm_id = i.hadm_id AND c.stay_id = i.stay_id) "
       } else {
         cohort_join <- " JOIN public.cohort c ON (c.subject_id = t.subject_id AND c.hadm_id = t.hadm_id AND c.stay_id = t.stay_id) "
@@ -378,6 +383,7 @@ query_generator <-
       paste0(
         "SELECT DISTINCT i.subject_id AS subject_id, i.hadm_id AS hadm_id, i.stay_id AS stay_id FROM ",
         schema, ".", linksto, " t ",
+        #ifelse(icu_time_join != "" || cohort_join != "",paste0("LEFT JOIN mimiciv_icu.icustays i ON (i.subject_id = t.subject_id AND t.hadm_id = i.hadm_id AND ",event_time_target[[linksto]], " BETWEEN intime - interval '24 hour' AND outtime + interval '1 hour')"),""),
         "LEFT JOIN mimiciv_icu.icustays i ON (i.subject_id = t.subject_id AND t.hadm_id = i.hadm_id AND ",
         event_time_target[[linksto]], " BETWEEN intime - interval '24 hour' AND outtime + interval '1 hour') ",
         ifelse(linksto == "prescriptions", " JOIN public.d_prescriptions USING(drug) ", ""),
@@ -387,7 +393,7 @@ query_generator <-
         icu_time_where,
         cohort_where,
         if (startsWith(where, "HAVING")) {
-          paste0(" GROUP BY i.subject_id, i.hadm_id, i.stay_id ", where)
+          paste0(" GROUP BY i.subject_id, i.hadm_id, i.stay_id ", where)#
         } else {
           paste0(" AND ", where)
         }
@@ -1355,7 +1361,11 @@ process_icd_filter <- function(database,user_condition_object,subset_to_filter){
   }
 
 
-
+  if (is.null(subset_to_filter)){
+    subset_to_filter <- dplyr::tbl(database(), in_schema("mimiciv_icu", "icustays")) %>%
+      select(subject_id,hadm_id,stay_id) %>%
+      collect()
+  }
   icd_filtered_result <- subset_to_filter %>% {
     if(!all(is.na(query_icd_allow))){
       inner_join(.,icd_filter_allow,by=c("subject_id","hadm_id"))
