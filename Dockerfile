@@ -42,7 +42,7 @@ RUN R --quiet -e "install.packages('renv', repos = 'https://cloud.r-project.org'
 
 USER shiny
 
-RUN R --quiet -e "renv::restore(lockfile = 'renv.lock', prompt = FALSE)"
+RUN R --quiet -e "source('renv/activate.R'); renv::restore(lockfile = 'renv.lock', prompt = FALSE)"
 
 COPY --chown=shiny:shiny . ./
 
