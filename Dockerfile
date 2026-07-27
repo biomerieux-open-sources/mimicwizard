@@ -15,6 +15,7 @@ RUN apt-get update \
         libcurl4-openssl-dev \
         libfontconfig1-dev \
         libfreetype6-dev \
+        libfribidi-dev \
         libharfbuzz-dev \
         libicu-dev \
         libjpeg-dev \
