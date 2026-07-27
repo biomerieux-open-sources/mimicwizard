@@ -6,7 +6,145 @@ cohortCreationServer <- function(id, database = NULL) {
 
                    selected_profile <- session$userData$selected_profile
 
-                   condition_object <- eventSearchbarServer("event_searchbar", database)
+                   # State passed to the eventSearchbar to hydrate its DOM when
+                   # a saved cohort configuration is loaded (upload / duplicate / edit).
+                   preload_state <- reactiveVal(NULL)
+
+                   # If non-NULL, the persist action performs an UPDATE on the given
+                   # cohort_id (edit mode) instead of an INSERT of a new cohort.
+                   edit_cohort_id  <- reactiveVal(NULL)
+                   edit_cohort_src <- reactiveVal(NULL)  # source metadata (name/desc)
+
+                   condition_object <- eventSearchbarServer("event_searchbar", database,
+                                                            preload_state = preload_state,
+                                                            upload_input_id = ns("upload_config"),
+                                                            upload_button_label = "Load saved config")
+
+                   # Cached raw client JSON of the last known filter chain, used to
+                   # serialize the current configuration for download / persist.
+                   last_filter_tojson <- reactiveVal(NULL)
+                   observe({
+                     val <- input[["event_searchbar-filter_tojson"]]
+                     if (!is.null(val)) last_filter_tojson(val)
+                   })
+
+                   # Per-condition SQL captured from the promise resolution to feed
+                   # the "Associated SQL" accordion.
+                   associated_sql_data <- reactiveVal(NULL)
+
+                   reset_creation_state <- function(reset_ui = FALSE) {
+                     fetched_cohort(NULL)
+                     edit_cohort_id(NULL)
+                     edit_cohort_src(NULL)
+                     associated_sql_data(NULL)
+                     preload_state(NULL)
+                     last_filter_tojson(NULL)
+
+                     if (isTRUE(reset_ui)) {
+                       runjs(paste0(
+                         "Shiny.setInputValue('",
+                         ns("event_searchbar-reset_searchbar_request"),
+                         "', Date.now(), {priority: 'event'});"
+                       ))
+                     }
+                   }
+
+                   last_profile_id <- reactiveVal(NULL)
+                   observe({
+                     profile <- selected_profile()
+                     if (is.null(profile) || is.null(profile$user_id)) return()
+                     current_id <- suppressWarnings(as.numeric(profile$user_id))
+                     previous_id <- last_profile_id()
+                     if (is.null(previous_id)) {
+                       last_profile_id(current_id)
+                       return()
+                     }
+                     if (!identical(previous_id, current_id)) {
+                       reset_creation_state(reset_ui = TRUE)
+                       last_profile_id(current_id)
+                     }
+                   })
+
+
+                   # ************************************************************************************#
+                   #----------------------------- LOAD CONFIGURATION FROM FILE ----------------------------
+                   # ____________________________________________________________________________________#
+
+                   observeEvent(input$upload_config, {
+                     f <- input$upload_config
+                     if (is.null(f)) return()
+                     tryCatch({
+                       json_text <- paste(readLines(f$datapath, warn = FALSE), collapse = "\n")
+                       cfg <- cohort_config_from_json(json_text)
+                       preload_state(NULL)
+                       preload_state(cfg)
+                       edit_cohort_id(NULL)
+                       edit_cohort_src(NULL)
+                       associated_sql_data(NULL)
+                       toast("Configuration loaded",
+                             "The search bar has been pre-filled from the uploaded configuration.",
+                             "green")
+                     }, error = function(e) {
+                       toast("Invalid configuration file",
+                             htmlEscape(conditionMessage(e)),
+                             "red")
+                     }, finally = {
+                       runjs(paste0(
+                         "var fi = document.getElementById('", ns("upload_config"), "');",
+                         "if (fi) { fi.value = ''; }"
+                       ))
+                     })
+                   })
+
+
+                   # ************************************************************************************#
+                   #------------------------------- HANDLE EXPLORER PRELOAD -------------------------------
+                   # Observe session-scoped signal set by the Cohort Explorer's Edit /
+                   # Duplicate icons.
+                   # ____________________________________________________________________________________#
+
+                   if (is.null(session$userData$cohort_creation_preload)) {
+                     session$userData$cohort_creation_preload <- reactiveVal(NULL)
+                   }
+                   observe({
+                     payload <- session$userData$cohort_creation_preload()
+                     if (is.null(payload)) return()
+                     preload_state(NULL)
+                     preload_state(payload$state)
+                     if (identical(payload$mode, "edit")) {
+                       edit_cohort_id(payload$source_cohort_id)
+                       edit_cohort_src(list(name = payload$source_name,
+                                            description = payload$source_desc))
+                     } else {
+                       edit_cohort_id(NULL)
+                       edit_cohort_src(NULL)
+                     }
+                     associated_sql_data(NULL)
+                     # Consume the signal to avoid re-firing on every observe pass.
+                     session$userData$cohort_creation_preload(NULL)
+                   })
+
+
+                   # ************************************************************************************#
+                   #------------------------------- MODE INDICATOR (EDIT/NEW) -----------------------------
+                   # ____________________________________________________________________________________#
+
+                   output$mode_indicator <- renderUI({
+                     if (!is.null(edit_cohort_id())) {
+                       src <- edit_cohort_src()
+                       name <- if (!is.null(src)) src$name else ""
+                       message_box(
+                         "Editing existing cohort",
+                         HTML(paste0(
+                           "You are editing cohort <b>", htmlEscape(name),
+                           "</b> (ID ", edit_cohort_id(),
+                           "). Submitting will overwrite its patient list and configuration."
+                         )),
+                         class = "warning my-10",
+                         closable = FALSE
+                       )
+                     }
+                   })
 
 
                    # ************************************************************************************#
@@ -16,8 +154,11 @@ cohortCreationServer <- function(id, database = NULL) {
 
                    fetched_cohort <- reactiveVal(NULL)
 
-                   output$fetched_details <- renderUI({
-                     if (is.list(condition_object()) != 0) {
+                   # Keep heavy query execution bound to fresh filter_tojson payloads
+                   # produced by explicit Fetch clicks in non-realtime mode.
+                   cohort_details_ui <- eventReactive(input[["event_searchbar-filter_tojson"]], {
+                     user_condition_object <- condition_object()
+                     if (!is.null(user_condition_object) && is.list(user_condition_object) && length(user_condition_object) != 0) {
                        runjs(paste0(
                          "$('#", ns("event_searchbar"), "-filter-container').find('.ui.label.filter').each(function(index) {",
                          "       $(this).removeClass('event-error');",
@@ -26,7 +167,6 @@ cohortCreationServer <- function(id, database = NULL) {
                        # Progress 0-1 init 1-4 request, 4-5 apply logic, 5-6 compute details
                        progress <- Progress$new(session, min = 0, max = 7)
                        progress$set(message = 'Generating request')
-                       user_condition_object <- condition_object()
                        progress$set(value = 1, message = 'Requesting database')
                        print("Step 1 Generate")
                        promise_list <-
@@ -83,6 +223,21 @@ cohortCreationServer <- function(id, database = NULL) {
 
                          data <- lapply(results, function(r) r$value)
                          names(data) <- sapply(results, function(r) r$key)
+
+                         # Capture per-condition SQL (surfaced via attr() on each
+                         # data frame by get_constrained_table).
+                         sql_by_condition <- lapply(names(data), function(key) {
+                           list(
+                             sql = attr(data[[key]], "sql"),
+                             params = attr(data[[key]], "params")
+                           )
+                         })
+                         names(sql_by_condition) <- names(data)
+                         associated_sql_data(list(
+                           per_condition = sql_by_condition,
+                           condition_object = user_condition_object
+                         ))
+
                          start.time <- Sys.time()
                          # Check if any condition uses exclusion
                          has_exclusion <- any(sapply(user_condition_object$constraint_list, function(c) isTRUE(c$constraint$is_exclusion)))
@@ -221,9 +376,27 @@ cohortCreationServer <- function(id, database = NULL) {
                      }
                      else{
                        fetched_cohort(NULL)
+                       associated_sql_data(NULL)
                        NULL
                      }
                    })
+
+                   output$fetched_details <- renderUI({
+                     cohort_details_ui()
+                   })
+
+
+                   # ************************************************************************************#
+                   #------------------------------- ASSOCIATED SQL ACCORDION ------------------------------
+                   # ____________________________________________________________________________________#
+
+                   output$associated_sql <- renderUI({
+                     data <- associated_sql_data()
+                     if (is.null(data)) return(NULL)
+                     render_associated_sql_accordion(data$per_condition, data$condition_object)
+                   })
+
+
                    # ************************************************************************************#
                    #---------------------------------- PERSIST COHORT ------------------------------------
                    # ____________________________________________________________________________________#
@@ -232,14 +405,19 @@ cohortCreationServer <- function(id, database = NULL) {
                    output$persist_action <- renderUI({
 
                      if (!is.null(fetched_cohort())) {
-                      htmltools::tagAppendAttributes(form(
+                       btn_label <- if (!is.null(edit_cohort_id())) "Update Cohort" else "Persist Cohort"
+                       src <- edit_cohort_src()
+                       init_name <- if (!is.null(src)) src$name        else ""
+                       init_desc <- if (!is.null(src)) src$description else ""
+
+                       htmltools::tagAppendAttributes(form(
                          fields(
                            field(
                              tags$label("Enter the cohort name"),
                              text_input(
                                ns("cohort_name"),
                                label = "",
-                               value = ""
+                               value = init_name
                              ),
                              class = "four wide"
                            ),
@@ -249,102 +427,236 @@ cohortCreationServer <- function(id, database = NULL) {
                              text_input(
                                ns("cohort_desc"),
                                label = "",
-                               value = ""
+                               value = init_desc
                              ),
                              class = "twelve wide"
                            )
                            ,
                            class = "inline"
                          ),
-                         button(ns("persist_button"), label = "Persist Cohort"),
+                         button(ns("persist_button"), label = btn_label),
+                         downloadButton(ns("download_config"), "Download configuration (JSON)",
+                                        class = "ui button", icon = NULL),
                          class = "mt-10"
                        ),style="position:static")
                      }
                    })
 
+                   output$download_config <- downloadHandler(
+                     filename = function() {
+                       name_part <- if (isTruthy(input$cohort_name)) {
+                         gsub("[^A-Za-z0-9._-]+", "_", input$cohort_name)
+                       } else {
+                         "cohort_config"
+                       }
+                       paste0("mimicwizard_cohort_", name_part, "_",
+                              format(Sys.time(), "%Y%m%d_%H%M%S"), ".json")
+                     },
+                     content = function(file) {
+                       cfg <- cohort_config_from_client(
+                         filter_tojson_raw = last_filter_tojson(),
+                         icd_to_keep = input[["event_searchbar-icd_to_keep"]],
+                         icd_to_deny = input[["event_searchbar-icd_to_deny"]],
+                         allow_condition = input[["event_searchbar-icd_to_keep_condition"]],
+                         deny_condition  = input[["event_searchbar-icd_to_deny_condition"]],
+                         cohort_name = if (isTruthy(input$cohort_name)) input$cohort_name else NULL,
+                         cohort_description = if (isTruthy(input$cohort_desc)) input$cohort_desc else NULL
+                       )
+                       writeLines(cohort_config_to_json(cfg), file)
+                     }
+                   )
+
+                   persist_click_key <- paste0(ns("persist_button"), "_last_count")
+                   if (is.null(session$userData[[persist_click_key]])) {
+                     session$userData[[persist_click_key]] <- reactiveVal(0L)
+                   }
+                   last_persist_click <- session$userData[[persist_click_key]]
+
                    persistMessage <-
                      eventReactive(input$persist_button, {
-                       if (input$cohort_name != "" && input$cohort_desc != "" && !is.null(fetched_cohort())) {
-                         withProgress(message = "Checking if cohort name is unique", {
-                           cohort_names <-
-                             dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>% select("cohort_name") %>% collect()
-                           if (!(input$cohort_name %in% as.list(cohort_names)$cohort_name)) {
-                             # Add cohort to d_cohorts
-                             d_cohorts_data <-
-                               data.frame(
-                                 cohort_name = c(input$cohort_name),
-                                 cohort_description = c(input$cohort_desc)
-                               )
-                             setProgress(value = 2 / 5, message = "Cohort description registration")
-                             dbAppendTable(database(),
-                                           Id(schema = "public", table = "d_cohorts"),
-                                           d_cohorts_data)
-                             new_cohort_id <-
-                               as.numeric(
-                                 dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>% filter(cohort_name == !!input$cohort_name) %>% select(cohort_id) %>% head(1) %>% collect()
-                               )
-                             # Linked patient data to this cohort
-                             setProgress(value = 3 / 5, message = "Retrieving data from cache")
-                             cohort_data <-
-                               fetched_cohort() %>% select(subject_id, hadm_id, stay_id) %>% mutate(cohort_id = new_cohort_id)
-                             setProgress(value = 4 / 5, message = "Cohort data persisting")
-                             dbAppendTable(
-                               database(),
-                               Id(schema = "public", table = "cohort"),
-                               as.data.frame(cohort_data)
-                             )
-                             if(!is.null(selected_profile) & selected_profile()$user_id != 0){
-                               query <- "UPDATE users SET user_cohorts = user_cohorts || $1 WHERE user_id = $2"
-                               update <- dbSendQuery(database(), query)
+                       current_click <- if (is.null(input$persist_button)) 0L else as.integer(input$persist_button)
+                       if (current_click <= isolate(last_persist_click())) {
+                         return(invisible(NULL))
+                       }
+                       last_persist_click(current_click)
 
-                               dbBind(update, list(paste0(',',new_cohort_id), selected_profile()$user_id))
-                               dbClearResult(update)
-                               }
-
-                             toast(
-                               "",
-                               paste0(
-                                 "Your cohort <b>",
-                                 htmlEscape(input$cohort_name),
-                                 "</b> has been persisted"
-                               ),
-                               "green"
-                             )
-                             fetched_cohort(NULL)
-                             message_box(
-                               "Persist action success",
-                               "Your now able to explore your cohort in Cohort Explorer page",
-                               class = "positive my-10",
-                               closable = T
-                             )
-                           } else{
-                             toast(
-                               "",
-                               paste0(
-                                 "A cohort named \"",
-                                 htmlEscape(input$cohort_name),
-                                 "\" already exist in database. Cohort name should be unique"
-                               ),
-                               "yellow"
-                             )
-                           }
-                         })
-                       } else{
+                       if (input$cohort_name == "" || input$cohort_desc == "" || is.null(fetched_cohort())) {
                          toast("",
                                paste0("A cohort should have a non-empty name and description"),
                                "red")
+                         return(invisible(NULL))
                        }
 
+                       # Build the JSON configuration to persist alongside the cohort row.
+                       cfg <- cohort_config_from_client(
+                         filter_tojson_raw = last_filter_tojson(),
+                         icd_to_keep = input[["event_searchbar-icd_to_keep"]],
+                         icd_to_deny = input[["event_searchbar-icd_to_deny"]],
+                         allow_condition = input[["event_searchbar-icd_to_keep_condition"]],
+                         deny_condition  = input[["event_searchbar-icd_to_deny_condition"]],
+                         cohort_name = input$cohort_name,
+                         cohort_description = input$cohort_desc
+                       )
+                       cfg_json <- as.character(cohort_config_to_json(cfg, pretty = FALSE))
 
+                       editing_id <- edit_cohort_id()
+
+                       if (is.null(editing_id)) {
+                         persist_new_cohort(database, input$cohort_name, input$cohort_desc,
+                                            fetched_cohort(), cfg_json, selected_profile)
+                       } else {
+                         persist_update_cohort(database, editing_id,
+                                               input$cohort_name, input$cohort_desc,
+                                               fetched_cohort(), cfg_json)
+                       }
                      })
 
                    output$result_persist <- renderUI({
-                     persistMessage()
+                     msg <- persistMessage()
+                     if (!is.null(msg)) {
+                       # After a successful persist/update, fully clear creation state.
+                       reset_creation_state(reset_ui = TRUE)
+                     }
+                     msg
                    })
 
 
                    }
 })
 }
+
+
+# ------------------------------------------------------------------------------
+# Persist helpers
+# ------------------------------------------------------------------------------
+
+persist_new_cohort <- function(database, cohort_name, cohort_description,
+                               cohort_rows, cfg_json, selected_profile) {
+  withProgress(message = "Checking if cohort name is unique", {
+    cohort_names <-
+      dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>%
+      select("cohort_name") %>% collect()
+    if (cohort_name %in% as.list(cohort_names)$cohort_name) {
+      toast("",
+            paste0(
+              "A cohort named \"",
+              htmlEscape(cohort_name),
+              "\" already exist in database. Cohort name should be unique"
+            ),
+            "yellow")
+      return(NULL)
+    }
+
+    setProgress(value = 1 / 5, message = "Cohort description registration")
+    insert_q <- "INSERT INTO public.d_cohorts (cohort_name, cohort_description, cohort_definition) VALUES ($1, $2, $3::jsonb) RETURNING cohort_id"
+    rs <- DBI::dbSendQuery(database(), insert_q)
+    DBI::dbBind(rs, list(cohort_name, cohort_description, cfg_json))
+    inserted <- DBI::dbFetch(rs)
+    DBI::dbClearResult(rs)
+    new_cohort_id <- as.numeric(inserted$cohort_id[1])
+
+    setProgress(value = 3 / 5, message = "Retrieving data from cache")
+    cohort_data <- cohort_rows %>%
+      select(subject_id, hadm_id, stay_id) %>%
+      mutate(cohort_id = new_cohort_id)
+
+    setProgress(value = 4 / 5, message = "Cohort data persisting")
+    dbAppendTable(database(),
+                  Id(schema = "public", table = "cohort"),
+                  as.data.frame(cohort_data))
+
+    if (!is.null(selected_profile) && selected_profile()$user_id != 0) {
+      query <- "UPDATE users SET user_cohorts = user_cohorts || $1 WHERE user_id = $2"
+      update <- dbSendQuery(database(), query)
+      dbBind(update, list(paste0(',', new_cohort_id), selected_profile()$user_id))
+      dbClearResult(update)
+    }
+
+    toast("",
+          paste0("Your cohort <b>", htmlEscape(cohort_name),
+                 "</b> has been persisted"),
+          "green")
+    message_box(
+      "Persist action success",
+      "Your now able to explore your cohort in Cohort Explorer page",
+      class = "positive my-10",
+      closable = TRUE
+    )
+  })
+}
+
+
+persist_update_cohort <- function(database, cohort_id, cohort_name,
+                                  cohort_description, cohort_rows, cfg_json) {
+  withProgress(message = "Updating cohort", value = 0, {
+    db <- database()
+    tryCatch({
+      DBI::dbBegin(db)
+
+      # Ensure name uniqueness among *other* cohorts.
+      setProgress(value = 1 / 5, message = "Validating cohort name")
+      name_conflict <- dplyr::tbl(db, in_schema("public", "d_cohorts")) %>%
+        filter(cohort_name == !!cohort_name & cohort_id != !!cohort_id) %>%
+        count() %>% collect()
+      if (as.numeric(name_conflict$n[1]) > 0) {
+        DBI::dbRollback(db)
+        toast("",
+              paste0("A cohort named \"", htmlEscape(cohort_name),
+                     "\" already exist in database. Cohort name should be unique"),
+              "yellow")
+        return(NULL)
+      }
+
+      setProgress(value = 2 / 5, message = "Updating cohort description")
+      upd <- "UPDATE public.d_cohorts SET cohort_name = $1, cohort_description = $2, cohort_definition = $3::jsonb WHERE cohort_id = $4"
+      rs <- DBI::dbSendQuery(db, upd)
+      DBI::dbBind(rs, list(cohort_name, cohort_description, cfg_json, cohort_id))
+      DBI::dbClearResult(rs)
+
+      setProgress(value = 3 / 5, message = "Removing previous cohort stays")
+      del <- "DELETE FROM public.cohort WHERE cohort_id = $1"
+      rs <- DBI::dbSendQuery(db, del)
+      DBI::dbBind(rs, list(cohort_id))
+      DBI::dbClearResult(rs)
+
+      setProgress(value = 4 / 5, message = "Inserting refreshed cohort stays")
+      new_rows <- cohort_rows %>%
+        select(subject_id, hadm_id, stay_id) %>%
+        mutate(cohort_id = cohort_id)
+      dbAppendTable(db,
+                    Id(schema = "public", table = "cohort"),
+                    as.data.frame(new_rows))
+
+      DBI::dbCommit(db)
+    }, error = function(e) {
+      tryCatch(DBI::dbRollback(db), error = function(e2) NULL)
+      toast("Update failed", htmlEscape(conditionMessage(e)), "red")
+      return(NULL)
+    })
+
+    toast("",
+          paste0("Cohort <b>", htmlEscape(cohort_name), "</b> has been updated"),
+          "green")
+    message_box(
+      "Update success",
+      "The cohort configuration and patient list have been overwritten.",
+      class = "positive my-10",
+      closable = TRUE
+    )
+  })
+}
+
+
+# ------------------------------------------------------------------------------
+# Associated SQL accordion renderer
+# ------------------------------------------------------------------------------
+
+render_associated_sql_accordion <- function(per_condition, condition_object) {
+  content <- render_associated_sql_content(per_condition, condition_object)
+  accordion(list(list(title = "Associated SQL", content = content)),
+            active_title = NULL,
+            fluid = TRUE)
+}
+
 
 

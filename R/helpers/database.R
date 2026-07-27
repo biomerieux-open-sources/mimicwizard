@@ -661,7 +661,10 @@ get_constrained_table <-
             database
           )
         print(query)
-        dbGetQuery(database, query$sql, params = query$params)
+        result <- dbGetQuery(database, query$sql, params = query$params)
+        attr(result, "sql") <- query$sql
+        attr(result, "params") <- query$params
+        result
       } else{
         stop(paste("request on this field is not allowed :",constraint$field))
       }
@@ -670,6 +673,37 @@ get_constrained_table <-
       stop(paste("item id should be numeric, current value :",constraint$itemid))
     }
 
+  }
+
+# Build the SQL statement that would be executed by get_constrained_table()
+# without actually running it. Used to render "Associated SQL" accordions.
+get_constrained_table_sql <-
+  function(database,
+           linksto,
+           constraint,
+           cohort_filter = NULL) {
+    schema <- get_table_schema(linksto)
+    if (!check.numeric(constraint$itemid)) {
+      stop(paste("item id should be numeric, current value :", constraint$itemid))
+    }
+    if (!(constraint$field %in% unique(unlist(allowed_target)))) {
+      stop(paste("request on this field is not allowed :", constraint$field))
+    }
+    column_type <- get_column_type(constraint$field, schema, linksto)
+    query <- query_generator(
+      schema,
+      linksto,
+      constraint$itemid,
+      constraint$constraint,
+      constraint$field,
+      constraint$value,
+      constraint$aggr,
+      constraint$time_constraint,
+      column_type,
+      cohort_filter,
+      database
+    )
+    list(sql = query$sql, params = query$params)
   }
 
 request_constrained <-

@@ -11,7 +11,7 @@ timeline <- function(x,
                      group_label = "category",
                      hover = list(Amount = c("amount", "amountuom"),
                                   Rate = c("rate", "rateuom")),
-                     id,
+                     id = "id",
                      one_mn_toNA = TRUE,
                      filename = NULL,
                      elementId = "timeline",
@@ -58,7 +58,7 @@ timeline <- function(x,
   # Format data
   if(nrow(y)>0){
     data <- data.frame(
-      id = 1:nrow(y),
+      id = y[[id]],
       start = y[[start]],
       end  = y[[end]],
       content = y[[content]],
@@ -73,7 +73,7 @@ timeline <- function(x,
 
   if(!is.null(hadm_start)){
     hadm <- data.frame(
-      id = c(nrow(data)+1),
+      id = c(max(c(0, data$id), na.rm = TRUE) + 1),
       start = c(hadm_start),
       end  = c(hadm_end),
       content = c("Hospital Stay"),
@@ -85,7 +85,7 @@ timeline <- function(x,
   }
   if(!is.null(stay_start)){
     stay <- data.frame(
-      id = c(nrow(data)+1),
+      id = c(max(c(0, data$id), na.rm = TRUE) + 1),
       start = c(stay_start),
       end  = c(stay_end),
       content = c("ICU Stay"),

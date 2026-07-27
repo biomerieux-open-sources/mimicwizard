@@ -45,7 +45,8 @@ CREATE SEQUENCE public.users_seq
 CREATE TABLE public.d_cohorts (
 	cohort_id int4 DEFAULT nextval('d_cohorts_seq'::regclass) NOT NULL,
 	cohort_name varchar NULL,
-	cohort_description text NULL
+	cohort_description text NULL,
+	cohort_definition jsonb NULL
 );
 
 CREATE TABLE public.d_customevents (
