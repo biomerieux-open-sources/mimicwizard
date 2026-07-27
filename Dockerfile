@@ -37,10 +37,11 @@ WORKDIR /app
 COPY --chown=shiny:shiny renv.lock ./
 COPY --chown=shiny:shiny renv/activate.R renv/settings.json ./renv/
 
+RUN R --quiet -e "install.packages('renv', repos = 'https://cloud.r-project.org')"
+
 USER shiny
 
-RUN R --quiet -e "install.packages('renv', repos = 'https://cloud.r-project.org')" \
-    && R --quiet -e "renv::restore(lockfile = 'renv.lock', prompt = FALSE)"
+RUN R --quiet -e "renv::restore(lockfile = 'renv.lock', prompt = FALSE)"
 
 COPY --chown=shiny:shiny . ./
 
