@@ -9,8 +9,28 @@ cohortExplorerServer <- function(id,
       cohortOutcomesExplorerServer("cohort_outcomes_explorer",database,isolate(reactive(input$cohort_picker)))
 
       cohort_restriction <- reactive({
-        selected_profile
-        as.numeric(unlist(selected_profile()$user_cohorts))
+        input$update_cohort_picker
+        profile <- selected_profile()
+        uid <- suppressWarnings(as.numeric(profile$user_id))
+        if (is.na(uid) || uid == 0) {
+          # Admin profile: no restriction (show all cohorts).
+          return(numeric(0))
+        }
+
+        # Refresh permissions locally from DB to avoid global update_profile churn.
+        q <- DBI::dbSendQuery(database(), "SELECT user_cohorts FROM users WHERE user_id = $1")
+        on.exit(try(DBI::dbClearResult(q), silent = TRUE), add = TRUE)
+        DBI::dbBind(q, list(uid))
+        row <- DBI::dbFetch(q)
+
+        if (nrow(row) == 0 || is.null(row$user_cohorts[1]) || is.na(row$user_cohorts[1])) {
+          return(numeric(0))
+        }
+
+        vals <- unlist(strsplit(as.character(row$user_cohorts[1]), ",", fixed = TRUE))
+        vals <- trimws(vals)
+        ids <- suppressWarnings(as.numeric(vals[nzchar(vals)]))
+        ids[!is.na(ids)]
       })
       timeline_itemid <- reactive({
         selected_profile
@@ -45,10 +65,16 @@ cohortExplorerServer <- function(id,
             tags$div(
               tagList(
                 icon("pointer grey sync rotate-on-hover", id = "refresh-cohort-picker"),
+                icon("pointer-scale grey pencil", id = "edit-cohort-picker"),
+                icon("pointer-scale grey clone", id = "duplicate-cohort-picker"),
+                downloadLink(
+                  ns("download_cohort_config"),
+                  label = icon("pointer-scale grey download"),
+                  class = "cohort-download-config-link"
+                ),
                 icon("pointer-scale grey trash", id = "delete-cohort-picker")
-                ),style="width:30px;display:inline-flex;"
+                ),style="width:150px;display:inline-flex;justify-content:space-around;"
               )
-
           )
         })
 
@@ -90,6 +116,96 @@ cohortExplorerServer <- function(id,
                                 "', Date.now());"))
         }
       })
+
+      # ****************************************************************************
+      # Edit / Duplicate / Download configuration icons on the picker.
+      # ****************************************************************************
+
+      fetch_cohort_definition <- function(cohort_id_val) {
+        if (!isTruthy(cohort_id_val) || is.na(as.numeric(cohort_id_val))) return(NULL)
+        row <- dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>%
+          filter(cohort_id == !!as.numeric(cohort_id_val)) %>%
+          collect()
+        if (nrow(row) == 0) return(NULL)
+        cfg <- NULL
+        if (!is.null(row$cohort_definition) && !is.na(row$cohort_definition[[1]]) &&
+            nzchar(as.character(row$cohort_definition[[1]]))) {
+          cfg <- tryCatch(
+            cohort_config_from_json(as.character(row$cohort_definition[[1]])),
+            error = function(e) NULL
+          )
+        }
+        list(
+          row = row,
+          cfg = cfg
+        )
+      }
+
+      trigger_creation_preload <- function(mode) {
+        fetched <- fetch_cohort_definition(input$cohort_picker)
+        if (is.null(fetched)) {
+          toast("Cohort not found",
+                "The selected cohort could not be loaded.",
+                "red")
+          return()
+        }
+        if (is.null(fetched$cfg)) {
+          toast("No configuration saved",
+                "This cohort was created before configuration saving was enabled. It cannot be edited or duplicated.",
+                "yellow")
+          return()
+        }
+
+        if (is.null(session$userData$cohort_creation_preload)) {
+          session$userData$cohort_creation_preload <- reactiveVal(NULL)
+        }
+        session$userData$cohort_creation_preload(list(
+          state = fetched$cfg,
+          mode = mode,
+          source_cohort_id = as.numeric(fetched$row$cohort_id[1]),
+          source_name = as.character(fetched$row$cohort_name[1]),
+          source_desc = as.character(fetched$row$cohort_description[1])
+        ))
+        # Switch to the Cohort Creation tab.
+        session$sendCustomMessage("update_tab", "cohort_creation")
+        # Fallback for deployments where the semantic.dashboard handler differs.
+        runjs("setTimeout(function(){ var t = document.querySelector('#uisidebar [data-value=\"cohort_creation\"]'); if (t) { t.click(); } }, 0);")
+      }
+
+      observeEvent(input[["edit_cohort"]], {
+        if (isTruthy(input$cohort_picker)) trigger_creation_preload("edit")
+      })
+      observeEvent(input[["duplicate_cohort"]], {
+        if (isTruthy(input$cohort_picker)) trigger_creation_preload("duplicate")
+      })
+
+      output$download_cohort_config <- downloadHandler(
+        filename = function() {
+          cohort_id_val <- input$cohort_picker
+          name_part <- "cohort_config"
+          if (isTruthy(cohort_id_val) && !is.na(as.numeric(cohort_id_val))) {
+            row <- dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>%
+              filter(cohort_id == !!as.numeric(cohort_id_val)) %>%
+              select(cohort_name) %>% collect()
+            if (nrow(row) > 0 && isTruthy(row$cohort_name[1])) {
+              name_part <- gsub("[^A-Za-z0-9._-]+", "_", row$cohort_name[1])
+            }
+          }
+          paste0("mimicwizard_cohort_", name_part, "_",
+                 format(Sys.time(), "%Y%m%d_%H%M%S"), ".json")
+        },
+        content = function(file) {
+          fetched <- fetch_cohort_definition(input$cohort_picker)
+          if (is.null(fetched) || is.null(fetched$cfg)) {
+            writeLines("{\"error\": \"No configuration saved for this cohort.\"}", file)
+            return()
+          }
+          # Refresh top-level metadata to reflect the cohort as stored.
+          fetched$cfg$cohort_name <- as.character(fetched$row$cohort_name[1])
+          fetched$cfg$cohort_description <- as.character(fetched$row$cohort_description[1])
+          writeLines(cohort_config_to_json(fetched$cfg), file)
+        }
+      )
 
       output$cohort_picked_ui <- renderUI({
         req(input$cohort_picker)
@@ -198,6 +314,39 @@ cohortExplorerServer <- function(id,
                 )[[i]], " : ")) , tags$span(summary[[i]]))
               })
             )))
+
+          # If a saved configuration exists for this cohort, add an
+          # "Associated SQL" accordion computed from the stored definition
+          # without hitting MIMIC (query_generator produces the string only).
+          sql_section <- tryCatch({
+            fetched <- fetch_cohort_definition(input$cohort_picker)
+            if (!is.null(fetched$cfg)) {
+              cond_obj <- cohort_config_to_condition_object(fetched$cfg, database)
+              per_condition <- list()
+              cl <- cond_obj$constraint_list
+              if (length(cl) > 0) {
+                for (i in seq_along(cl)) {
+                  key <- paste0("condition_", i)
+                  entry <- cl[[i]]
+                  per_condition[[key]] <- tryCatch(
+                    get_constrained_table_sql(
+                      database(),
+                      entry$linksto,
+                      entry$constraint,
+                      NULL
+                    ),
+                    error = function(e) list(sql = paste("Error:", conditionMessage(e)), params = list())
+                  )
+                }
+              }
+              list(list(title = "Associated SQL",
+                        content = render_associated_sql_content(per_condition, cond_obj)))
+            } else NULL
+          }, error = function(e) NULL)
+
+          if (!is.null(sql_section)) {
+            accordion_content <- c(accordion_content, sql_section)
+          }
 
           accordion(accordion_content,
                     active_title = "Cohort Summary",
@@ -1585,7 +1734,6 @@ cohortExplorerServer <- function(id,
           "');
                     });
                      $('body').on('click', '#refresh-cohort-picker',function(){
-                    Shiny.setInputValue('update_profile', Date.now());
                         Shiny.setInputValue('",
                           ns('update_cohort_picker'),
                           "', Date.now());
@@ -1593,6 +1741,16 @@ cohortExplorerServer <- function(id,
                     $('body').on('click', '#delete-cohort-picker',function(){
                       Shiny.setInputValue('",
                         ns('delete_cohort'),
+                        "', Date.now());
+                    });
+                    $('body').on('click', '#edit-cohort-picker',function(){
+                      Shiny.setInputValue('",
+                        ns('edit_cohort'),
+                        "', Date.now());
+                    });
+                    $('body').on('click', '#duplicate-cohort-picker',function(){
+                      Shiny.setInputValue('",
+                        ns('duplicate_cohort'),
                         "', Date.now());
                     });"
         )

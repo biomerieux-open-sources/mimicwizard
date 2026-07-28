@@ -3,7 +3,10 @@ eventSearchbarServer <-
            database = NULL,
            search_label = "Select the parameters you want to put a condition on",
            is_realtime = F,
-           trigger_label = "Fetch Cohort") {
+           trigger_label = "Fetch Cohort",
+           preload_state = NULL,
+           upload_input_id = NULL,
+           upload_button_label = "Load config") {
     moduleServer(id,
                  function(input, output, session) {
                    ns <- session$ns
@@ -26,7 +29,47 @@ eventSearchbarServer <-
                          "black"
                        )
 
+                     # Resolve display labels for saved ICD "<version> <code>" values so the
+                     # remote-search icd_to_keep/icd_to_deny dropdowns can render a menu item
+                     # for them on hydration (they have none locally until searched).
+                     icd_values_to_labels <- function(database, values) {
+                       if (!isTruthy(values) || length(values) == 0) return(list())
+                       values <- as.character(values)
+                       parsed <- lapply(values, function(v) {
+                         parts <- strsplit(trimws(v), "\\s+")[[1]]
+                         list(
+                           value = v,
+                           version = suppressWarnings(as.numeric(parts[1])),
+                           code = paste(parts[-1], collapse = " ")
+                         )
+                       })
+                       codes <- unique(vapply(parsed, function(p) p$code, character(1)))
+                       versions <- unique(stats::na.omit(vapply(parsed, function(p) p$version, numeric(1))))
+                       rows <- tryCatch({
+                         if (length(codes) == 0 || length(versions) == 0) {
+                           NULL
+                         } else {
+                           dplyr::tbl(database(), in_schema("mimiciv_hosp", "d_icd_diagnoses")) %>%
+                             filter(trimws(icd_code) %in% !!codes, icd_version %in% !!versions) %>%
+                             select(icd_code, icd_version, long_title) %>%
+                             collect()
+                         }
+                       }, error = function(e) NULL)
 
+                       lapply(parsed, function(p) {
+                         label <- p$value
+                         if (!is.null(rows) && nrow(rows) > 0 && !is.na(p$version)) {
+                           match_row <- rows[rows$icd_version == p$version & trimws(rows$icd_code) == p$code, ]
+                           if (nrow(match_row) > 0) {
+                             label <- paste0(
+                               match_row$icd_code[1], "v", trimws(as.character(match_row$icd_version[1])),
+                               " - ", match_row$long_title[1]
+                             )
+                           }
+                         }
+                         list(value = p$value, name = label)
+                       })
+                     }
 
                      # ************************************************************************************#
                      #-------------------------- PARAMETER SELECTION --------------------------------------
@@ -38,16 +81,56 @@ eventSearchbarServer <-
                        #search_input <- custom_search_selection_choices(ns("select_filter"),
                        # choices)
                        search_input <- search_selection_api(ns("select_filter"), search_api_url_distinct_events)
+                       search_row <- tags$div(
+                         style = "display:flex;align-items:flex-end;gap:8px;",
+                         tags$div(style = "flex:1;min-width:0;", search_input),
+                         if (!is.null(upload_input_id)) {
+                           tags$a(
+                             id = ns("open-upload-config"),
+                             class = "ui tiny basic button",
+                             icon("upload"),
+                             upload_button_label
+                           )
+                         }
+                       )
                        form(fields(field(
                          tags$label(search_label),
-                         search_input
-                       )))
+                         search_row
+                       ),class="two"))
 
                      })
+
+                     if (!is.null(upload_input_id)) {
+                       shinyjs::runjs(
+                         paste0(
+                           "$('body').on('click', '#",
+                           ns("open-upload-config"),
+                           "', function(e) {",
+                           "  e.preventDefault();",
+                           "  let input = document.getElementById('",
+                           upload_input_id,
+                           "');",
+                           "  if (input) { input.click(); }",
+                           "});"
+                         )
+                       )
+                     }
 
                      filter <- reactiveValues(data = list())
 
                      unique_label_id <- reactiveVal(100000)
+
+                     observeEvent(input$reset_searchbar_request, {
+                       unique_label_id(100000)
+                       shinyjs::html("filter-container", "")
+                       runjs(paste0(
+                         "$('.ui.dropdown.", ns("icd_to_keep"), "').dropdown('clear');",
+                         "$('.ui.dropdown.", ns("icd_to_deny"), "').dropdown('clear');",
+                         "$('.ui.dropdown.", ns("icd_to_keep_condition"), "').dropdown('set selected','OR');",
+                         "$('.ui.dropdown.", ns("icd_to_deny_condition"), "').dropdown('set selected','OR');",
+                         "Shiny.setInputValue('", ns("filter_tojson"), "', null, {priority: 'event'});"
+                       ))
+                     }, ignoreInit = TRUE)
 
 
 
@@ -365,6 +448,144 @@ eventSearchbarServer <-
 
                        }
                      })
+
+
+                     # ************************************************************************************#
+                     #-------------------------- PRELOAD FILTER STATE --------------------------------------
+                     # Reconstruct the search bar from a saved chain_condition (see
+                     # helpers/cohort_config.R). preload_state can be either a reactive/
+                     # reactiveVal returning a `cfg` list (with `chain_condition`,
+                     # `icd_to_allow`, `icd_to_deny`, `allow_condition`, `deny_condition`),
+                     # or a plain list.
+                     # ____________________________________________________________________________________#
+
+                     if (!is.null(preload_state)) {
+                       if(!is.null(session$userData[[ns("observe_preload")]])){
+                         session$userData[[ns("observe_preload")]]$destroy()
+                       }
+                       session$userData[[ns("observe_preload")]] <- observe({
+                         # Accept either reactive/reactiveVal or plain list payloads.
+                         cfg <- preload_state
+                         if (is.function(preload_state)) {
+                           cfg <- tryCatch(preload_state(), error = function(e) NULL)
+                         } else if (is.reactive(preload_state)) {
+                           cfg <- preload_state()
+                         }
+                         if (is.null(cfg)) return()
+                         chain <- cfg$chain_condition
+                         if (is.null(chain)) return()
+
+                         # Reset the container so repeated loads don't stack.
+                         shinyjs::html("filter-container", "")
+
+                         constraint_values <- list()
+                         html_chunks <- list()
+
+                         for (row in chain) {
+                           if (is.null(row$type)) next
+                           if (row$type == "filter") {
+                             cur_label_id <- isolate(unique_label_id())
+                             itemid <- as.character(row$itemid)
+                             color_key <- as.integer(event_colors[itemid])
+                             if (is.na(color_key)) color_key <- 0
+                             e_color <- semantic_color_list[(color_key %% 13) + 1]
+                             text <- tryCatch(
+                               distinct_events %>%
+                                 filter(value == !!itemid) %>%
+                                 select(name) %>%
+                                 as.character(),
+                               error = function(e) itemid
+                             )
+
+                             label_html <- as.character(
+                               div(
+                                 div(
+                                   tagList(
+                                     icon("caret square down outline"),
+                                     span(text),
+                                     div(class = "ui label")
+                                   ),
+                                   icon(class = "linkstolabel close"),
+                                   value = itemid,
+                                   class = paste0("ui label filter ", e_color),
+                                   id = ns(paste0("label-", as.character(cur_label_id)))
+                                 ),
+                                 tagAppendAttributes(
+                                   div(
+                                     uiItemFilterGenerator(itemid, text, cur_label_id),
+                                     class = "ui popup",
+                                     style = "max-width:450px;width:450px;z-index:9999999999;position:static;"
+                                   ),
+                                   linkedlabel = as.character(cur_label_id)
+                                 ),
+                                 contenteditable = "false",
+                                 class = "label-popup"
+                               )
+                             )
+                             html_chunks[[length(html_chunks) + 1]] <- label_html
+
+                             constraint_values[[as.character(cur_label_id)]] <- list(
+                               field = row$field,
+                               constraint = row$constraint,
+                               aggr = row$aggr,
+                               value = row$value,
+                               is_exclusion = isTRUE(row$is_exclusion),
+                               is_time_constrained = isTRUE(row$is_time_constrained),
+                               time_min = row$time_min,
+                               time_max = row$time_max
+                             )
+
+                             unique_label_id(cur_label_id + 1)
+                           } else if (row$type == "condition") {
+                             op <- if (isTruthy(row$element)) row$element else "OR"
+                             html_chunks[[length(html_chunks) + 1]] <- paste0(" ", op, " ")
+                           } else if (row$type == "enclose") {
+                             tok <- if (identical(row$element, "open")) "(" else ")"
+                             html_chunks[[length(html_chunks) + 1]] <- tok
+                           }
+                         }
+
+                         if (length(html_chunks) > 0) {
+                           shinyjs::html("filter-container", paste(html_chunks, collapse = ""))
+                           runjs(
+                             "$('.ui.label.filter').popup({on:'click',position:'bottom left', lastResort: 'top right',movePopup: false});"
+                           )
+                           runjs("$('.inline.icon').popup({inline: true, on: 'click'});")
+                         }
+
+                         # Hydrate popup form values through a JS custom message.
+                         session$sendCustomMessage(
+                           ns("preloadFilterState"),
+                           list(
+                             ns_prefix = substr(ns(""), 1, nchar(ns("")) - 1),
+                             filter_container = ns("filter-container"),
+                             values = constraint_values
+                           )
+                         )
+
+                         # ICD selectors. icd_to_keep/icd_to_deny use a remote-search
+                         # (API-backed) dropdown, so we must resolve a display label for
+                         # each value and inject a matching menu item client-side before
+                         # selecting it - otherwise Fomantic silently drops unknown values.
+                         # split_icd_codes() also handles the legacy format where all codes
+                         # were persisted as a single comma-joined string in one list item.
+                         icd_allow <- split_icd_codes(cfg$icd_to_allow)
+                         icd_deny  <- split_icd_codes(cfg$icd_to_deny)
+                         session$sendCustomMessage(
+                           ns("preloadIcdState"),
+                           list(
+                             icd_to_keep_id = ns("icd_to_keep"),
+                             icd_to_deny_id = ns("icd_to_deny"),
+                             icd_to_keep_condition_id = ns("icd_to_keep_condition"),
+                             icd_to_deny_condition_id = ns("icd_to_deny_condition"),
+                             icd_to_keep = icd_values_to_labels(database, icd_allow),
+                             icd_to_deny = icd_values_to_labels(database, icd_deny),
+                             allow_condition = if (isTruthy(cfg$allow_condition)) cfg$allow_condition else "OR",
+                             deny_condition  = if (isTruthy(cfg$deny_condition))  cfg$deny_condition  else "OR"
+                           )
+                         )
+                       })
+                     }
 
 
                      output$filter_render <- renderUI({
@@ -690,6 +911,13 @@ eventSearchbarServer <-
 
                      })
 
+                     # Keep core searchbar outputs rendered even when tab is hidden,
+                     # so preload/hydration can be applied before the tab is shown.
+                     outputOptions(output, "add_filter", suspendWhenHidden = FALSE)
+                     outputOptions(output, "filter_render", suspendWhenHidden = FALSE)
+                     outputOptions(output, "icd_code_restriction", suspendWhenHidden = FALSE)
+                     outputOptions(output, "fetch_action", suspendWhenHidden = FALSE)
+
 
                      condition_to_filter <-
                        list("AND" = "&", "OR" = "|")
@@ -714,78 +942,14 @@ eventSearchbarServer <-
                            )
                          } else{
                            if(length(result_object$result)>0){
-                             conditionDF <- result_object$result
-                             condition_string <- ""
-                             condition_id <- 1
-                             constraint_list <- list()
-                             # Used to complete implicit condition separator (OR by default)
-                             can_expect_condition_separator = F
-                             for (rowidx in 1:length(conditionDF)) {
-                               row <- conditionDF[[rowidx]]
-                               if (row$type == "filter") {
-                                 if (can_expect_condition_separator) {
-                                   condition <- condition_to_filter[["OR"]]
-                                   condition_string <-
-                                     paste0(condition_string, condition)
-                                 }
-                                 can_expect_condition_separator <- T
-                                 linksto <-
-                                   (
-                                     dplyr::tbl(
-                                       database(),
-                                       in_schema("public", "distinct_events")
-                                     ) %>% filter(itemid == !!row$itemid) %>% select("linksto") %>% collect()
-                                   )[[1]]
-                                 constraint_list[[as.character(condition_id)]] <-
-                                   list()
-                                 constraint_list[[as.character(condition_id)]]$constraint <-
-                                   list(
-                                     itemid = row$itemid,
-                                     constraint = row$constraint,
-                                     aggr = row$aggr,
-                                     field = row$field,
-                                     value = row$value,
-                                     is_exclusion = isTRUE(row$is_exclusion),
-                                     time_constraint = list(
-                                       "is_time_constrained" = row$is_time_constrained,
-                                       "time_min" = row$time_min,
-                                       "time_max" = row$time_max
-                                     )
-                                   )
-
-                                 constraint_list[[as.character(condition_id)]]$linksto <-
-                                   linksto
-                                 condition <-
-                                   paste0("condition_", condition_id)
-                                 condition_id <- condition_id + 1
-                               }
-                               else if (row$type == "condition") {
-                                 condition <- condition_to_filter[row$element]
-                                 can_expect_condition_separator <- F
-                               }
-                               else if (row$type == "enclose") {
-                                 if (can_expect_condition_separator && row$element == "open") {
-                                   condition <- condition_to_filter["OR"]
-                                   condition_string <-
-                                     paste0(condition_string, condition)
-                                 }
-                                 if (row$element == "close") {
-                                   can_expect_condition_separator <- T
-                                 } else{
-                                   can_expect_condition_separator <- F
-                                 }
-                                 condition <-
-                                   enclose_to_filter[row$element]
-                               }
-                               condition_string <-
-                                 paste0(condition_string, condition)
-                             }
-                             list("condition_string" = condition_string,
-                                  "constraint_list" = constraint_list,
-                                  "icd_to_allow" = isolate(input$icd_to_keep),
-                                  "icd_to_deny" = isolate(input$icd_to_deny),
-                                  "allow_condition" = isolate(input$icd_to_keep_condition),
-                                  "deny_condition" = isolate(input$icd_to_deny_condition))
+                             chain_condition_to_condition_object(
+                               chain_condition = result_object$result,
+                               database = database,
+                               icd_to_allow = isolate(input$icd_to_keep),
+                               icd_to_deny  = isolate(input$icd_to_deny),
+                               allow_condition = isolate(input$icd_to_keep_condition),
+                               deny_condition  = isolate(input$icd_to_deny_condition)
+                             )
                            } else if(length(input$icd_to_keep)>0 || length(input$icd_to_deny)>0){
                              list("condition_string" = "",
                                   "constraint_list" = list(),
@@ -1119,6 +1283,149 @@ eventSearchbarServer <-
                     });"
                        )
                      )
+
+                     # ************************************************************************************#
+                     # Hydration handlers used when preload_state supplies a saved cohort configuration.
+                     # ____________________________________________________________________________________#
+                     shinyjs::runjs(
+                       paste0(
+                         "Shiny.addCustomMessageHandler('", ns("preloadFilterState"), "', function(payload){
+                           function applyHydration(attempt) {
+                             // Generous retry budget: popup generation involves a synchronous
+                             // per-filter DB query server-side (uiItemFilterGenerator), which
+                             // can be slow on a cold connection/cache (first click of a session).
+                             // 150 attempts * 100ms = 15s ceiling before giving up.
+                             let maxAttempts = 150;
+                             let container = $('#' + payload.filter_container);
+                             if (container.length === 0) {
+                               if (attempt < maxAttempts) {
+                                 setTimeout(function(){ applyHydration(attempt + 1); }, 100);
+                               }
+                               return;
+                             }
+
+                             let values = payload.values || {};
+                             let expected = Object.keys(values).length;
+                             let available = 0;
+                             for (let id in values) {
+                               let p = $('#", ns("label"), "-' + id + ' + .ui.popup');
+                               if (p.length > 0) available += 1;
+                             }
+                             if (expected > 0 && available < expected && attempt < maxAttempts) {
+                               setTimeout(function(){ applyHydration(attempt + 1); }, 100);
+                               return;
+                             }
+
+                             for(let labelId in values){
+                               let cfg = values[labelId];
+                               let popup = $('#", ns("label"), "-' + labelId + ' + .ui.popup');
+                               if(popup.length === 0){ continue; }
+                               let fieldSel = popup.find('.constraint-field > div > select');
+                               let typeSel  = popup.find('.constraint-type > div > select');
+                               let aggrSel  = popup.find('.constraint-aggr > div > select');
+                               if(cfg.field  != null && fieldSel.length){ fieldSel.val(cfg.field);  fieldSel.find('option').removeAttr('selected'); fieldSel.find('option[value=\"'+cfg.field+'\"]').attr('selected','selected'); }
+                               if(cfg.constraint != null && typeSel.length){ typeSel.val(cfg.constraint); typeSel.find('option').removeAttr('selected'); typeSel.find('option[value=\"'+cfg.constraint+'\"]').attr('selected','selected'); }
+                               if(cfg.aggr != null && aggrSel.length){ aggrSel.val(cfg.aggr);  aggrSel.find('option').removeAttr('selected'); aggrSel.find('option[value=\"'+cfg.aggr+'\"]').attr('selected','selected'); }
+
+                               let valInput = popup.find('input[id$=\"-constraint_value\"]');
+                               if(valInput.length && cfg.value != null){ valInput.val(cfg.value).attr('value', cfg.value); }
+
+                               let exclCb = popup.find('.constraint-exclusion-enabled > input');
+                               if(exclCb.length){
+                                 if(cfg.is_exclusion){ exclCb.prop('checked', true).attr('checked','checked'); exclCb.parent().addClass('checked'); }
+                                 else{ exclCb.prop('checked', false).removeAttr('checked'); exclCb.parent().removeClass('checked'); }
+                               }
+
+                               let timeCb = popup.find('.constraint-time-enabled > input');
+                               if(timeCb.length){
+                                 if(cfg.is_time_constrained){
+                                   timeCb.prop('checked', true).attr('checked','checked');
+                                   timeCb.parent().addClass('checked');
+                                   timeCb.parent().parent().find('.fields').show();
+                                 } else{
+                                   timeCb.prop('checked', false).removeAttr('checked');
+                                   timeCb.parent().removeClass('checked');
+                                   timeCb.parent().parent().find('.fields').hide();
+                                 }
+                               }
+                               let tMin = popup.find('.constraint-time-min');
+                               let tMax = popup.find('.constraint-time-max');
+                               if(tMin.length && cfg.time_min != null){ tMin.val(cfg.time_min).attr('value', cfg.time_min); }
+                               if(tMax.length && cfg.time_max != null){ tMax.val(cfg.time_max).attr('value', cfg.time_max); }
+
+                               let constraintValueTxt = valInput.length ? valInput.val() : '';
+                               let constraintTimeTxt = cfg.is_time_constrained ? (' (' + cfg.time_min + 'h-' + cfg.time_max + 'h)') : '';
+                               let fieldShown = cfg.field || '';
+                               if(cfg.aggr && cfg.aggr !== ''){ fieldShown = cfg.aggr + '(' + fieldShown + ')'; }
+                               let exclusionPrefix = cfg.is_exclusion ? 'EXCLUDE ' : '';
+                               $('#", ns("label"), "-' + labelId + ' > .ui.label').html(exclusionPrefix + fieldShown + ' ' + (cfg.constraint || '') + ' ' + constraintValueTxt + constraintTimeTxt);
+                             }
+
+                             $('.ui.label.filter').popup({on:'click',position:'bottom left', lastResort: 'top right', movePopup: false});
+                             $('#' + payload.filter_container).trigger('change');
+                           }
+
+                           applyHydration(0);
+                         });
+
+                         Shiny.addCustomMessageHandler('", ns("preloadIcdState"), "', function(payload){
+                            // icd_to_keep / icd_to_deny are remote-search dropdowns: they have
+                            // no local menu items for values that haven't been searched for,
+                            // so 'set exactly' alone silently does nothing. We inject a menu
+                            // item (value + label) for each entry first, then select them.
+                            // Retries below cover the case where this message arrives before
+                            // the dropdown widget's own init script has run (e.g. loading a
+                            // JSON config without a tab switch beforehand).
+                            function setApiDropdown(inputId, items){
+                              let $dd = $('.ui.dropdown.' + inputId);
+                              if($dd.length === 0){ return false; }
+                              $dd.dropdown('clear');
+                              let values = [];
+                              if(items && items.length > 0){
+                                let menu = $dd.find('> .menu');
+                                items.forEach(function(it){
+                                  values.push(it.value);
+                                  if(menu.find('.item[data-value=\"' + it.value + '\"]').length === 0){
+                                    menu.append($('<div class=\"item\"></div>').attr('data-value', it.value).text(it.name));
+                                  }
+                                });
+                                $dd.dropdown('set exactly', values);
+                              }
+                              // Fomantic's automatic change propagation is not reliable for
+                              // remote-search (apiSettings) dropdowns, so explicitly sync the
+                              // hidden input and push the value to Shiny ourselves - otherwise
+                              // the visible tags look correct but input[[inputId]] stays stale
+                              // and the ICD filter silently does not apply on fetch.
+                              let $hidden = $dd.find('> input[type=\"hidden\"]');
+                              $hidden.val(values.join(','));
+                              $hidden.trigger('change');
+                              if(window.Shiny){
+                                Shiny.setInputValue(inputId, values.join(','), {priority: 'event'});
+                              }
+                              return true;
+                            }
+                            function setSelectDropdown(inputId, value){
+                              let $dd = $('.ui.dropdown.' + inputId);
+                              if($dd.length === 0){ return false; }
+                              if(value){ $dd.dropdown('set selected', value); }
+                              return true;
+                            }
+                            function applyIcdHydration(attempt){
+                              let maxAttempts = 150;
+                              let ok1 = setApiDropdown(payload.icd_to_keep_id, payload.icd_to_keep);
+                              let ok2 = setApiDropdown(payload.icd_to_deny_id, payload.icd_to_deny);
+                              let ok3 = setSelectDropdown(payload.icd_to_keep_condition_id, payload.allow_condition);
+                              let ok4 = setSelectDropdown(payload.icd_to_deny_condition_id, payload.deny_condition);
+                              if((!ok1 || !ok2 || !ok3 || !ok4) && attempt < maxAttempts){
+                                setTimeout(function(){ applyIcdHydration(attempt + 1); }, 100);
+                              }
+                            }
+                            applyIcdHydration(0);
+                         });
+                        "
+                       )
+                     )
+
                      return(condition_object)
                    }
                  })

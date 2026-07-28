@@ -501,18 +501,21 @@ patientExplorerServer <-
                   ),
                   class = "mb-10")
                 } else{
+                  selected_stay_id <- isolate(input$stay_id)
+                  selected_stay_value <- if (
+                    isTruthy(selected_stay_id) && selected_stay_id %in% stay_id_list
+                  ) {
+                    selected_stay_id
+                  } else{
+                    NULL
+                  }
                   form(field(
                     tags$label("Select a stay_id"),
                     shiny.semantic::dropdown_input(
                       ns("stay_id"),
                       choices_value = stay_id_list,
                       choices = labels,
-                      value = ifelse(
-                        isTruthy(isolate(input$stay_id)) &&
-                          isolate(input$stay_id) %in% stay_id_list,
-                        isolate(input$stay_id),
-                        -1
-                      ),
+                      value = selected_stay_value,
                     )
                   ),
                   class = "mb-10")

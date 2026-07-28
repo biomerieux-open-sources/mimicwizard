@@ -40,6 +40,15 @@ More information about the application and usage are available on the [ReadTheDo
 > Access to the full MIMIC-IV dataset requires credentialing and completion of a data use agreement. Visit [PhysioNet](https://physionet.org) for more information.
 
 ### 📦 Changelog
+**v1.1** (2026-07-27)
+Patient Explorer :
+- fix : grouped events are now correctly displayed on timeline when grouped along individual events
+- fix : improve performance when displaying a hadm before a stay
+
+Cohort creation & Cohort explorer :
+- feat : cohort can now be edited, copied, exported and imported for reproducibility
+- feat : cohort now display underling SQL logic
+
 
 **v1.0** (2026-04-15)
 General
@@ -48,13 +57,13 @@ General
 
 **v0.9.1** (2026-04-01)
 
-Event Searchbar :
+Event searchbar :
 - feat : add unit of measure on value field
 - enhancement : error when using event filtering are now more explicit 
 - fix : correct error throwing on datetimeevents
 - fix : auto-convert comma with point when filtering with numerical value 
 
-Cohort Explorer :
+Cohort explorer :
 - fix : refresh and delete button
 
 
@@ -72,10 +81,10 @@ Cohort explorer:
 - fix : we added some warning when using statistical testing in Clinical Data Desc. tab
 
 **v0.8.1** (2026-03-03)
-Cohort Explorer :
+Cohort explorer :
 - feat : cohort parameter exploration now support advanced stratification
 
-Patient Explorer
+Patient explorer
 - fix : microbiology events was lacking of time attribute
 
 **v0.8.0** (2025-11-05) Clinical notes and extended data
@@ -83,7 +92,7 @@ Patient Explorer
 General
 - Support for MIMIC-IV clinical notes (discharge), activate the flag in the global.R file
 
-Patient Explorer
+Patient explorer
 - Adding hadm/stay start and end time visualization on timeline
 - Add extended data when visualize hospitalization, get access to lab and microbiology result when data is consitent with hospital stay but not linked to a hadm_id (useful for ED lab measurement)
 - Bugfixes
