@@ -11,6 +11,8 @@ permissions:
 
 jobs:
   build:
+    environment:
+      name: Docker Hub Publishing
     # Pull requests validate the image. A published GitHub Release pushes it.
     # Publishing requires DOCKERHUB_IMAGE, for example "account/mimicwizard".
     if: github.event_name == 'pull_request' || vars.DOCKERHUB_IMAGE != ''
