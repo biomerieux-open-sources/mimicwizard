@@ -1,4 +1,9 @@
-# 🧙 MIMICWizard
+# 🧙 MIMICWizard 
+[![Docker Image Version](https://img.shields.io/docker/v/lucasduval/mimicwizard?sort=semver)](https://hub.docker.com/r/lucasduval/mimicwizard) ![GitHub Release Date](https://img.shields.io/github/release-date/biomerieux-open-sources/mimicwizard) ![GitHub contributors](https://img.shields.io/github/contributors/biomerieux-open-sources/mimicwizard) 
+
+
+
+
 
 **MIMICWizard** is an open-source web application that enables intuitive exploration of the [MIMIC-IV](https://physionet.org/content/mimiciv/) critical care database by clinicians and researchers without programming expertise
 
@@ -33,6 +38,8 @@ This demo version use [MIMIC-IV demo database](https://physionet.org/content/mim
 ## 🛠 Installation and usage
 
 MIMICWizard is based on R Shiny and interact with a PostgreSQL database. Detailed setup instruction are available on the [dedicated documentation page](https://mimicwizard.readthedocs.io/en/latest/installation/).
+
+The application can be installed via Docker or source, please refer to documentation.
 
 More information about the application and usage are available on the [ReadTheDocs documentation](https://mimicwizard.readthedocs.io/en/latest/).
 
