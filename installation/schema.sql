@@ -1487,16 +1487,18 @@ WITH DATA;
 
 CREATE MATERIALIZED VIEW public.static_distinct_events
 TABLESPACE pg_default
-AS SELECT cq.itemid,
-    cq.label,
-    cq.category,
-    cq.linksto,
-    cq.param_type
+AS SELECT itemid,
+    label,
+    category,
+    linksto,
+    param_type,
+    unitname
    FROM ( SELECT DISTINCT d_items.itemid,
             d_items.label,
             d_items.linksto,
             d_items.category,
-            d_items.param_type
+            d_items.param_type,
+            d_items.unitname
            FROM mimiciv_icu.d_items
           WHERE d_items.linksto::text = 'procedureevents'::text
         UNION ALL
@@ -1504,7 +1506,8 @@ AS SELECT cq.itemid,
             d_items.label,
             d_items.linksto,
             d_items.category,
-            d_items.param_type
+            d_items.param_type,
+            d_items.unitname
            FROM mimiciv_icu.d_items
           WHERE d_items.linksto::text = 'ingredientevents'::text
         UNION ALL
@@ -1512,7 +1515,8 @@ AS SELECT cq.itemid,
             d_items.label,
             d_items.linksto,
             d_items.category,
-            d_items.param_type
+            d_items.param_type,
+            d_items.unitname
            FROM mimiciv_icu.d_items
           WHERE d_items.linksto::text = 'inputevents'::text
         UNION ALL
@@ -1520,7 +1524,8 @@ AS SELECT cq.itemid,
             d_items.label,
             d_items.linksto,
             d_items.category,
-            d_items.param_type
+            d_items.param_type,
+            d_items.unitname
            FROM mimiciv_icu.d_items
           WHERE d_items.linksto::text = 'outputevents'::text
         UNION ALL
@@ -1528,7 +1533,8 @@ AS SELECT cq.itemid,
             d_items.label,
             d_items.linksto,
             d_items.category,
-            d_items.param_type
+            d_items.param_type,
+            d_items.unitname
            FROM mimiciv_icu.d_items
           WHERE d_items.linksto::text = 'datetimeevents'::text
         UNION ALL
@@ -1536,7 +1542,8 @@ AS SELECT cq.itemid,
             d_items.label,
             d_items.linksto,
             d_items.category,
-            d_items.param_type
+            d_items.param_type,
+            d_items.unitname
            FROM mimiciv_icu.d_items
           WHERE d_items.linksto::text = 'chartevents'::text
         UNION ALL
@@ -1544,31 +1551,40 @@ AS SELECT cq.itemid,
             d_labitems.label,
             'labevents'::text AS linksto,
             d_labitems.category,
-            d_labitems.fluid AS param_type
+            d_labitems.fluid AS param_type,
+            ( SELECT l.valueuom
+                   FROM mimiciv_hosp.labevents l
+                  WHERE d_labitems.itemid = l.itemid
+                 LIMIT 1) AS unitname
            FROM mimiciv_hosp.d_labitems
         UNION ALL
          SELECT DISTINCT microbiologyresultsevents.itemid,
             microbiologyresultsevents.label,
             'microbiologyresultsevents'::text AS linksto,
             'Microbiology'::text AS category,
-            NULL::character(1) AS param_type
+            NULL::character(1) AS param_type,
+            NULL::character(1) AS unitname
            FROM microbiologyresultsevents
         UNION ALL
          SELECT DISTINCT d_prescriptions.itemid,
             d_prescriptions.drug AS label,
             'prescriptions'::text AS linksto,
             'Prescriptions'::text AS category,
-            NULL::character(1) AS param_type
+            NULL::character(1) AS param_type,
+            NULL::character(1) AS unitname
            FROM d_prescriptions
         UNION ALL
          SELECT DISTINCT demographics.itemid,
             demographics.label,
             'demographics'::text AS linksto,
             'Demographics'::text AS category,
-            demographics.valueuom AS param_type
-           FROM demographics) cq
+            demographics.valueuom AS param_type,
+            ( SELECT de.valueuom
+                   FROM demographics de
+                  WHERE demographics.itemid = de.itemid
+                 LIMIT 1) AS unitname
+           FROM demographics demographics) cq
 WITH DATA;
-
 
 -- public.distinct_events source
 
@@ -1577,12 +1593,14 @@ AS SELECT sde.itemid,
     sde.label,
     sde.category,
     sde.linksto,
-    sde.param_type
+    sde.param_type,
+    sde.unitname
    FROM static_distinct_events sde
 UNION ALL
  SELECT dc.itemid,
     dc.label,
     'User imported'::character varying AS category,
     'customevents'::character varying AS linksto,
-    dc.author AS param_type
+    dc.author AS param_type,
+    NULL::character(1) AS unitname
    FROM d_customevents dc;
