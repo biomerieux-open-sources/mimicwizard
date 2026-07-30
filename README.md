@@ -48,6 +48,10 @@ More information about the application and usage are available on the [ReadTheDo
 
 ### 📦 Changelog
 **v1.1** (2026-07-27)
+
+General :
+- Configuration variable need to be exposed as environment variable (global.R configuration does not work anymore)
+
 Patient Explorer :
 - fix : grouped events are now correctly displayed on timeline when grouped along individual events
 - fix : improve performance when displaying a hadm before a stay
