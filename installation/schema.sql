@@ -344,7 +344,7 @@ AS SELECT m.subject_id,
     m.test_name AS label,
     m.org_name AS value,
         CASE
-            WHEN m.org_name::text ~~ 'NEGATIVE%'::text OR m.org_name::text = 'CANCELLED'::text THEN 0
+            WHEN m.org_name::text ~~ 'NEGATIVE%'::text OR m.org_name::text = 'CANCELLED'::text OR m.org_name::text = 'MIXED BACTERIAL FLORA' THEN 0
             ELSE 1
         END AS valuenum,
     m.microevent_id,
