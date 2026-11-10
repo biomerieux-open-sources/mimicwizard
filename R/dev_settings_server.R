@@ -24,7 +24,8 @@ devSettingsServer <- function(id, database = NULL) {
                                "charttime",
                                "value",
                                "valueuom")
-          if (all(names(file_data()) %in% required_column)) {
+          if (all(required_column %in% names(file_data())) &&
+              all(names(file_data()) %in% required_column)) {
             check_not_empty <- TRUE
             for (col_name in required_column) {
               x <- file_data()[[col_name]]

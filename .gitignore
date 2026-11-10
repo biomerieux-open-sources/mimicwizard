@@ -1,4 +1,4 @@
-.Rproj.user
+S.Rproj.user
 cache/*
 core.*
 .Rhistory
@@ -7,3 +7,12 @@ core.*
 app.Rproj
 .Rprofile
 demo/*
+R/modules/llm_module_server.R
+R/modules/llm_module_ui.R
+.gitignore
+*.ipynb_checkpoints*
+infrastructure
+renv/.dockerignore
+.env
+.env.*
+!.env.example

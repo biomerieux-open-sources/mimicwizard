@@ -358,7 +358,7 @@ query_generator <-
       } else {
         icu_time_join <- paste0(
           " JOIN (SELECT stay_id, hr, endtime - interval '1 hour' AS starttime, endtime FROM mimiciv_derived.icustay_hourly ih) ih
-          ON (t.stay_id = ih.stay_id AND t.", event_time_target[[linksto]], " BETWEEN ih.starttime AND ih.endtime) "
+          ON (t.stay_id = ih.stay_id AND t.", event_time_target[[linksto]], " >= ih.starttime AND t.", event_time_target[[linksto]], " < ih.endtime) "
         )
       }
 
