@@ -47,6 +47,15 @@ More information about the application and usage are available on the [ReadTheDo
 > Access to the full MIMIC-IV dataset requires credentialing and completion of a data use agreement. Visit [PhysioNet](https://physionet.org) for more information.
 
 ### 📦 Changelog
+
+**v1.1.1** (2026-11-10)
+Dev settings :
+- fix : MIMICWizard now return an error when we enter a csv file with the wrong column name or format
+
+Cohort creation  :
+- fix: hourly restriction are now upper exclusive to prevent an event to be affected to 2 differents windows
+
+
 **v1.1** (2026-07-27)
 
 General :
