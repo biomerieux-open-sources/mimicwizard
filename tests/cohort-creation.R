@@ -2,9 +2,13 @@
 
 library(DBI)
 library(dplyr)
+library(dbplyr)
+library(shiny)
+library(tidyr)
 
 source("R/helpers/database.R")
 source("R/helpers/logical.R")
+source("R/patient_events_server.R")
 
 dbname <- Sys.getenv("COHORT_TEST_DB")
 if (!identical(dbname, "mimicwizard_cohort_test")) {
@@ -26,11 +30,17 @@ tryCatch({
     "('mimiciv_icu', 'mimiciv_hosp', 'mimiciv_derived')"
   ))
   if (nrow(existing)) stop("Test schemas already exist; refusing to alter this database.")
+  if (dbExistsTable(con, Id(schema = "public", table = "cohort"))) {
+    stop("public.cohort already exists; refusing to alter this database.")
+  }
 
   statements <- c(
     "CREATE SCHEMA mimiciv_icu",
     "CREATE SCHEMA mimiciv_hosp",
     "CREATE SCHEMA mimiciv_derived",
+    paste("CREATE TABLE public.cohort (cohort_id integer, subject_id integer,",
+          "hadm_id integer, stay_id integer)"),
+    "INSERT INTO public.cohort VALUES (1, 1, 11, 101), (2, 2, 22, 201)",
     paste("CREATE TABLE mimiciv_icu.icustays (subject_id integer, hadm_id integer,",
           "stay_id integer, intime timestamp, outtime timestamp)"),
     paste("CREATE TABLE mimiciv_icu.chartevents (subject_id integer, hadm_id integer,",
@@ -39,6 +49,13 @@ tryCatch({
           "itemid integer, charttime timestamp, valuenum numeric)"),
     paste("CREATE TABLE mimiciv_derived.icustay_hourly",
           "(stay_id integer, hr integer, endtime timestamp)"),
+    paste("CREATE TABLE mimiciv_hosp.diagnoses_icd",
+          "(subject_id integer, hadm_id integer, seq_num integer, icd_code text, icd_version integer)"),
+    paste("CREATE TABLE mimiciv_hosp.d_icd_diagnoses",
+          "(icd_code text, icd_version integer, long_title text)"),
+    "INSERT INTO mimiciv_hosp.d_icd_diagnoses VALUES ('X', 10, 'Example')",
+    paste("INSERT INTO mimiciv_hosp.diagnoses_icd VALUES",
+          "(1, 11, 1, 'X', 10), (2, 22, 1, 'X', 10), (2, 22, 6, 'X', 10)"),
     paste("INSERT INTO mimiciv_icu.icustays VALUES",
           "(1, 11, 101, '2020-01-02 00:00', '2020-01-02 08:00'),",
           "(1, 11, 102, '2020-01-02 10:00', '2020-01-02 18:00'),",
@@ -98,6 +115,72 @@ tryCatch({
       cat("FAIL:", name, "-", conditionMessage(e), "\n")
     })
   }
+
+  test("column type lookups reuse the provided database connection", {
+    before <- dbGetQuery(con, "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()")$n
+    for (i in 1:5) {
+      if (!identical(get_column_type("valuenum", "mimiciv_icu", "chartevents", con), "numeric")) {
+        stop("Unexpected column type.")
+      }
+    }
+    after <- dbGetQuery(con, "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()")$n
+    if (after != before || !dbIsValid(con)) stop("Column type lookup changed the active connection count.")
+  })
+  test("outcome ICD queries release temporary tables on repeated refresh", {
+    population <- tibble::tibble(
+      subject_id = c(1L, 1L, 2L), hadm_id = c(11L, 11L, 22L),
+      strat = c("A", "A", "B")
+    )
+    temp_count <- function() dbGetQuery(con, paste(
+      "SELECT count(*) AS n FROM pg_class",
+      "WHERE relnamespace = pg_my_temp_schema() AND relkind = 'r'"
+    ))$n
+    before <- temp_count()
+    for (i in 1:5) {
+      result <- get_cohort_icd_counts(con, population)
+      if (!identical(sort(result$strat), c("A", "B")) || any(result$n != 1L)) {
+        stop("Incorrect ICD counts across strata.")
+      }
+      if (temp_count() != before) stop("Temporary tables were not removed.")
+    }
+    empty <- get_cohort_icd_counts(con, population[FALSE, ])
+    if (nrow(empty) != 0L || temp_count() != before) {
+      stop("Empty cohort returned ICD counts or left a temporary table.")
+    }
+  })
+  test("patient explorer switches and refreshes cohorts without recreating the module", {
+    runjs <- function(...) NULL
+    custom_register_search <- function(session, data, search_query, endpoint_name, database = NULL) data
+    selected <- reactiveVal(NULL)
+    refresh <- reactiveVal(0L)
+    selected_cohort <- reactive({ refresh(); selected() })
+    testServer(patientExplorerServer, args = list(database = reactive(con), cohort_id = selected_cohort), {
+      stopifnot(is.null(uid_list()), is.null(subject_id_list()))
+      selected(1L)
+      session$flushReact()
+      stopifnot(setequal(uid_list()$uid, c(1L, 11L, 101L)),
+                identical(subject_id_list()$subject_id, 1L),
+                setequal(search_api_url_uid()$uid, c(1L, 11L, 101L)),
+                identical(search_api_url_subject_id()$subject_id, 1L))
+      timeline_itemid_list$data <- 99
+      card_list$data <- list(99)
+      selected(2L)
+      session$flushReact()
+      stopifnot(setequal(uid_list()$uid, c(2L, 22L, 201L)),
+                identical(subject_id_list()$subject_id, 2L),
+                setequal(search_api_url_uid()$uid, c(2L, 22L, 201L)),
+                identical(search_api_url_subject_id()$subject_id, 2L),
+                length(timeline_itemid_list$data) == 0L,
+                length(card_list$data) == 0L)
+      dbExecute(con, "INSERT INTO public.cohort VALUES (2, 3, 33, 301)")
+      refresh(1L)
+      session$flushReact()
+      stopifnot(setequal(subject_id_list()$subject_id, c(2L, 3L)))
+      selected(NULL)
+      session$flushReact()
+      stopifnot(is.null(uid_list()), is.null(subject_id_list()))
+    })
+  })
 
   test("overlapping attribution buffers preserve both stays", {
     assert_stays(run_query("labevents", 10), c(101, 102))

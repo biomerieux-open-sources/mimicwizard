@@ -752,6 +752,7 @@ eventSearchbarServer <-
                          if (is.null(value)) {
                            #For large/complex requesting, use a dedicated db connection to not freeze app
                            dedicated_db_link <- connect_to_mimic()
+                           tryCatch({
                            table_schema <-
                              get_table_schema(param_info[["linksto"]])
                            table <-
@@ -795,7 +796,7 @@ eventSearchbarServer <-
                                select(!!eval(selected_field)) %>%
                                head(100) %>% collect()
                              column_type <-
-                               get_column_type(selected_field, table_schema, param_info[["linksto"]])
+                               get_column_type(selected_field, table_schema, param_info[["linksto"]], dedicated_db_link)
                              if (!(column_type %in% list("character varying","text"))) {
                                value <-
                                  numeric_preview(
@@ -859,8 +860,8 @@ eventSearchbarServer <-
                                  ".Rda"
                                )
                              )
-                             dbDisconnect(dedicated_db_link)
                            }
+                           }, finally = DBI::dbDisconnect(dedicated_db_link))
 
                          }
 

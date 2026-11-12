@@ -606,8 +606,7 @@ query_generator <-
 
   }
 
-get_column_type <- function(field, schema, table) {
-  database <- connect_to_mimic()
+get_column_type <- function(field, schema, table, database) {
   column_type_query <-
     paste0('SELECT pg_typeof("',
            field,
@@ -620,6 +619,34 @@ get_column_type <- function(field, schema, table) {
                         LIMIT 1')
   #String = character varying
   as.character(dplyr::tbl(database, sql(column_type_query)) %>% collect())
+}
+
+get_cohort_icd_counts <- function(database, stratified_data) {
+  table_name <- basename(tempfile("mimicwizard_cohort_"))
+  qualified_name <- paste0("pg_temp.", DBI::dbQuoteIdentifier(database, table_name))
+  exists <- DBI::dbGetQuery(database, "SELECT to_regclass($1) IS NOT NULL AS present",
+                            params = list(qualified_name))$present
+  if (exists) {
+    stop("Temporary cohort table already exists: ", table_name)
+  }
+  on.exit({
+    DBI::dbExecute(database, paste("DROP TABLE IF EXISTS", qualified_name))
+  }, add = TRUE)
+  cohort_admissions <- stratified_data %>%
+    dplyr::select(subject_id, hadm_id, strat) %>%
+    dplyr::distinct()
+  cohort_admissions <- dplyr::copy_to(
+    database, cohort_admissions, name = table_name, temporary = TRUE,
+    in_transaction = FALSE
+  )
+  diagnoses <- dplyr::tbl(database, dbplyr::in_schema("mimiciv_hosp", "diagnoses_icd"))
+  dictionary <- dplyr::tbl(database, dbplyr::in_schema("mimiciv_hosp", "d_icd_diagnoses"))
+  diagnoses %>%
+    dplyr::inner_join(cohort_admissions, by = c("subject_id", "hadm_id")) %>%
+    dplyr::filter(seq_num <= 5) %>%
+    dplyr::inner_join(dictionary, by = c("icd_version", "icd_code")) %>%
+    dplyr::count(icd_code, icd_version, long_title, strat, sort = TRUE) %>%
+    dplyr::collect()
 }
 
 allowed_target <- list(
@@ -645,7 +672,7 @@ get_constrained_table <-
     if (check.numeric(constraint$itemid)) {
       if(constraint$field %in% unique(unlist(allowed_target))){
         column_type <-
-          get_column_type(constraint$field, schema, linksto)
+          get_column_type(constraint$field, schema, linksto, database)
         query <-
           query_generator(
             schema,
@@ -689,7 +716,7 @@ get_constrained_table_sql <-
     if (!(constraint$field %in% unique(unlist(allowed_target)))) {
       stop(paste("request on this field is not allowed :", constraint$field))
     }
-    column_type <- get_column_type(constraint$field, schema, linksto)
+    column_type <- get_column_type(constraint$field, schema, linksto, database)
     query <- query_generator(
       schema,
       linksto,
@@ -724,15 +751,16 @@ request_constrained <-
         if (is_synchronous) {
 
           dedicated_db_link <- connect_to_mimic()
-          data <-
+          data <- tryCatch(
             get_constrained_table(
               dedicated_db_link,
               constraint_list[[as.character(condition_id)]]$linksto,
               constraint_list[[as.character(condition_id)]]$constraint,
               cohort_filter
-            ) %>% collect()
+            ) %>% collect(),
+            finally = DBI::dbDisconnect(dedicated_db_link)
+          )
 
-          DBI::dbDisconnect(dedicated_db_link)
           table_list[[paste0("condition_", condition_id)]] <- data
         } else{
           table_list[[paste0("condition_", condition_id)]] <-
@@ -758,15 +786,16 @@ request_constrained <-
               {
                 start.time <- Sys.time()
                 dedicated_db_link <- connect_to_mimic()
-                data <-
+                data <- tryCatch(
                   get_constrained_table(
                     dedicated_db_link,
                     constraint_list[[as.character(condition_id)]]$linksto,
                     constraint_list[[as.character(condition_id)]]$constraint,
                     cohort_filter
-                  ) %>% collect()
+                  ) %>% collect(),
+                  finally = DBI::dbDisconnect(dedicated_db_link)
+                )
 
-                DBI::dbDisconnect(dedicated_db_link)
                 end.time <- Sys.time()
                 time.taken <- end.time - start.time
                 print(paste("request time :", time.taken))

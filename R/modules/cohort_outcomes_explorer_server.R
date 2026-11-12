@@ -377,13 +377,7 @@ cohortOutcomesExplorerServer <-
 
           strat_number <- isolate(strat_counter())
 
-          diagnoses_icd <- dplyr::tbl(database(), in_schema("mimiciv_hosp", "diagnoses_icd"))
-          d_icd_diagnoses <- dplyr::tbl(database(), in_schema("mimiciv_hosp", "d_icd_diagnoses"))
-          icd_data <- stratified_data %>% select(subject_id,hadm_id,strat) %>% distinct() %>% {
-            inner_join(x=diagnoses_icd,y=.,by=c("subject_id","hadm_id"),copy=TRUE)
-          } %>%
-            filter(seq_num <= 5) %>% inner_join(d_icd_diagnoses,by=c("icd_version","icd_code")) %>%
-          count(icd_code,icd_version,long_title,strat,sort = TRUE) %>% collect()
+          icd_data <- get_cohort_icd_counts(database(), stratified_data)
           segment_color <- c("red","orange","yellow","olive","green","blue")
           cohort_outcomes_export(wider_stratified)
           cohort_icd_export(icd_data)

@@ -18,6 +18,9 @@ filters, or a full MIMIC installation.
 | EXCLUDE | Predicate matches or is empty | Matching stays are removed from the stay universe |
 | Parentheses | `A AND (B OR C)` | Explicitly enumerated reference stays |
 | Aggregation | SUM over two adjacent hourly windows | Boundary event contributes once |
+| Connection reuse | Repeated database column-type lookups | Reuses the existing connection |
+| Outcomes refresh | Repeated ICD counts across strata | Correct counts; temporary tables are removed |
+| Patient explorer | Switch and refresh cohorts in one Shiny module | Search data updates and previous patient plot state resets |
 
 Both ICU chart events and hospital lab events are tested for hourly boundaries,
 missing values, missing timestamps, and SUM. COUNT is not currently offered as
@@ -33,7 +36,8 @@ temporal attribution with an hourly restriction. Hourly windows use
 
 ## Running locally
 
-Install R packages `DBI`, `RPostgres`, and `dplyr`. Create an **empty,
+Install R packages `DBI`, `RPostgres`, `dplyr`, `dbplyr`, `shiny`, `shinyjs`,
+and `tidyr`. Create an **empty,
 disposable** PostgreSQL database named `mimicwizard_cohort_test`, then run:
 
 ```sh
@@ -44,8 +48,8 @@ Rscript --vanilla tests/cohort-creation.R
 
 The test user needs permission to create schemas. Fixtures are created inside a
 transaction and rolled back, including on test failure. The runner refuses a
-different database name or pre-existing MIMIC schemas. Never point it at a
-production database.
+different database name, pre-existing MIMIC schemas, or an existing
+`public.cohort` table. Never point it at a production database.
 
 To make the GitHub check mandatory, configure a repository branch protection
 rule or ruleset requiring the `cohort-tests` job; a workflow alone cannot enable

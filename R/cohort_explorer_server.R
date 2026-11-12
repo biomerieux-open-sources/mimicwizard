@@ -355,12 +355,11 @@ cohortExplorerServer <- function(id,
 
       })
 
-      # Use patient explorer as a module to display information
-      observe({
-        patientExplorerInstance <- patientExplorerServer("cohort_patient_explorer",
-                                                         database,
-                                                         input$cohort_picker)
-      })
+      # Initialize the module once; its cohort selection remains reactive.
+      patientExplorerServer("cohort_patient_explorer", database, reactive({
+        input$update_cohort_picker
+        input$cohort_picker
+      }))
 
       allowed_target <- list(
         "inputevents" = c("amount", "rate"),
@@ -485,7 +484,7 @@ cohortExplorerServer <- function(id,
           itemid <- input$parameter_picker
 
           column_type <-
-            get_column_type(input$field_picker, schema, table)
+            get_column_type(input$field_picker, schema, table, database())
 
           if (column_type == "character varying" && input$force_cast) {
             field <- paste0(
@@ -1470,10 +1469,7 @@ cohortExplorerServer <- function(id,
 
 
 
-      observe({
-        req(input$cohort_picker)
-        clinicalDataDescServer("clinical_data_desc", database, clinical_data_list)
-      })
+      clinicalDataDescServer("clinical_data_desc", database, clinical_data_list)
 
       output$export_data_csv <- downloadHandler(
         filename = function() {
