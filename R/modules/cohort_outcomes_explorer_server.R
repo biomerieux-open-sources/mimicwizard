@@ -422,9 +422,37 @@ cohortOutcomesExplorerServer <-
                 } else{
                   .
                 }
-              } %>%
-              bold_labels() %>%
-              as_gt()
+              }
+
+          count_rows <- tibble::tibble(
+            variable = c("subject_id", "hadm_id"),
+            var_type = "continuous",
+            row_type = "label",
+            var_label = c("Number of subjects", "Number of hospital admissions"),
+            label = var_label,
+            n = as.character(c(
+              n_distinct(stratified_data$subject_id, na.rm = TRUE),
+              n_distinct(stratified_data$hadm_id, na.rm = TRUE)
+            ))
+          )
+          stat_columns <- grep("^stat_[0-9]+$", names(gt_table$table_body), value = TRUE)
+          for (stat_column in stat_columns) {
+            population <- stratified_data
+            if (strat_number > 0) {
+              strat_label <- gt_table$table_styling$header$modify_stat_level[
+                gt_table$table_styling$header$column == stat_column
+              ]
+              population <- population %>% filter(strat == !!strat_label)
+            }
+            count_rows[[stat_column]] <- as.character(c(
+              n_distinct(population$subject_id, na.rm = TRUE),
+              n_distinct(population$hadm_id, na.rm = TRUE)
+            ))
+          }
+          gt_table <- gt_table %>%
+            gtsummary::modify_table_body(~ dplyr::bind_rows(count_rows, .x)) %>%
+            bold_labels() %>%
+            as_gt()
 
           withSpinner(tagList(HTML(gt::as_raw_html(gt_table)), div(tagList(
             lapply(c(

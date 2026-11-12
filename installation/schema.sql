@@ -301,10 +301,24 @@ UNION
     i.stay_id,
     i.intime AS charttime,
     15 AS itemid,
-    'ICU admission count'::text AS label,
+    'ICU admission index for an hadm'::text AS label,
     (( SELECT count(*) AS count
            FROM mimiciv_icu.icustays icu
           WHERE icu.hadm_id = i.hadm_id AND icu.intime <= i.intime))::text AS value,
+    ''::text AS valueuom
+   FROM mimiciv_icu.icustays i
+     JOIN mimiciv_hosp.admissions USING (subject_id, hadm_id)
+     JOIN mimiciv_hosp.patients USING (subject_id)
+UNION
+ SELECT i.subject_id,
+    i.hadm_id,
+    i.stay_id,
+    i.intime AS charttime,
+    16 AS itemid,
+    'ICU admission index for a subject'::text AS label,
+    (( SELECT count(*) AS count
+           FROM mimiciv_icu.icustays icu
+          WHERE icu.subject_id = i.subject_id AND icu.intime <= i.intime))::text AS value,
     ''::text AS valueuom
    FROM mimiciv_icu.icustays i
      JOIN mimiciv_hosp.admissions USING (subject_id, hadm_id)

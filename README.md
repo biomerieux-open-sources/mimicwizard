@@ -136,5 +136,8 @@ This application was developed by the **Laboratoire Commun de Recherche - HCL-bi
 
 We welcome contributions from the community! To contribute:
 
+The [cohort creation regression matrix](tests/README.md) runs on pull requests
+and describes how to run it locally.
+
 1.  Open a issue about your concerns, problems or feature proposal
 2.  Fork the repository and open a Pull Request with your code suggestion

@@ -353,7 +353,7 @@ query_generator <-
       if (schema %in% c("mimiciv_hosp", "public") && linksto != "demographics") {
         icu_time_join <- paste0(
           " JOIN (SELECT stay_id, hr, endtime - interval '1 hour' AS starttime, endtime FROM mimiciv_derived.icustay_hourly ih) ih
-          ON (i.stay_id = ih.stay_id AND t.", event_time_target[[linksto]], " BETWEEN ih.starttime AND ih.endtime) "
+          ON (i.stay_id = ih.stay_id AND t.", event_time_target[[linksto]], " >= ih.starttime AND t.", event_time_target[[linksto]], " < ih.endtime) "
         )
       } else {
         icu_time_join <- paste0(
@@ -1417,4 +1417,3 @@ process_icd_filter <- function(database,user_condition_object,subset_to_filter){
     }
   icd_filtered_result
 }
-

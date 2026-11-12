@@ -63,6 +63,28 @@ parsecondition <- function(string){
   return(string)
 }
 
+apply_cohort_conditions <- function(data, condition_object, universe = NULL) {
+  condition_env <- new.env(parent = environment())
+  for (key in names(data)) {
+    condition_idx <- sub("^condition_", "", key)
+    d <- data[[key]]
+    if (isTRUE(condition_object$constraint_list[[condition_idx]]$constraint$is_exclusion)) {
+      if (is.null(universe)) stop("A stay universe is required for exclusion conditions.")
+      join_by <- if (!("stay_id" %in% names(d)) || is.null(d$stay_id[1])) {
+        c("subject_id", "hadm_id")
+      } else {
+        c("subject_id", "hadm_id", "stay_id")
+      }
+      d <- dplyr::anti_join(universe, d, by = join_by)
+    }
+    assign(key, d, envir = condition_env)
+  }
+  expression <- parsecondition(condition_object$condition_string)
+  expression <- gsub("[", "(", expression, fixed = TRUE)
+  expression <- gsub("]", ")", expression, fixed = TRUE)
+  eval(parse(text = expression), envir = condition_env)
+}
+
 truncate_string <- function(input_string,n=200) {
   if (nchar(input_string) > n) {
     return(paste0(substr(input_string, 1, n), "..."))
@@ -70,5 +92,4 @@ truncate_string <- function(input_string,n=200) {
     return(input_string)
   }
 }
-
 

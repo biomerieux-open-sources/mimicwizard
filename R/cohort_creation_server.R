@@ -248,25 +248,8 @@ cohortCreationServer <- function(id, database = NULL) {
                              distinct() %>%
                              collect()
                          }
-                         for(key in names(data)){
-                           condition_idx <- gsub("condition_", "", key)
-                           d <- data[[key]]
-                           if (isTRUE(user_condition_object$constraint_list[[condition_idx]]$constraint$is_exclusion)) {
-                             # Pre-compute complement: stays in universe NOT matching this condition
-                             join_by <- if (!("stay_id" %in% names(d)) || is.null(d$stay_id[1])) {
-                               c("subject_id", "hadm_id")
-                             } else {
-                               c("subject_id", "hadm_id", "stay_id")
-                             }
-                             d <- anti_join(universe, d, by = join_by)
-                           }
-                           assign(key, d)
-                         }
-                         escaped_expression <- parsecondition(user_condition_object$condition_string)
-                         expression_to_eval <- gsub("[","(",escaped_expression,fixed=T)
-                         expression_to_eval <- gsub("]",")",expression_to_eval,fixed=T)
                          progress$set(value = 4, message = 'Applying logic between filters')
-                         result <- eval(parse(text=expression_to_eval))
+                         result <- apply_cohort_conditions(data, user_condition_object, universe)
                          progress$set(value = 5, message = 'Applying ICD filters')
                          icd_filtered_result <- process_icd_filter(database,user_condition_object,result)
 
@@ -657,6 +640,5 @@ render_associated_sql_accordion <- function(per_condition, condition_object) {
             active_title = NULL,
             fluid = TRUE)
 }
-
 
 
