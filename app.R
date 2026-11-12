@@ -33,6 +33,8 @@ library(broom)
 library(cardx)
 source("global.R")
 
+MIMICWIZARD_VERSION <- unname(read.dcf(here::here("DESCRIPTION"), fields = "Version")[1, 1])
+
 plan(sequential)
 options(shiny.maxRequestSize = 500 * 1024 ^ 2) #Max upload size is 500MB
 options(bitmapType = 'cairo')
@@ -69,7 +71,7 @@ ui <- tagList({
         class = "title",
         icon("hat wizard"),
         span("MIMICWizard"),
-        tags$small("1.1.1"),
+        tags$small(MIMICWIZARD_VERSION),
         div("A MIMIC-IV explorer for non technical users", class = "subtitle")
       ),
       div(
@@ -108,7 +110,7 @@ ui <- tagList({
     title = tags$span(
       icon("hat wizard"),
       "MIMIC Wizard",
-      tags$small("1.1.1", style = "font-size:0.5em")
+      tags$small(MIMICWIZARD_VERSION, style = "font-size:0.5em")
     ),
     center = uiOutput("demo_top_label"),
     right = tagList(
