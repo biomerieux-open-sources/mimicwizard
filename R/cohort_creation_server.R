@@ -157,8 +157,18 @@ cohortCreationServer <- function(id, database = NULL) {
                    # Keep heavy query execution bound to fresh filter_tojson payloads
                    # produced by explicit Fetch clicks in non-realtime mode.
                    cohort_details_ui <- eventReactive(input[["event_searchbar-filter_tojson"]], {
+                     fetched_cohort(NULL)
+                     associated_sql_data(NULL)
                      user_condition_object <- condition_object()
                      if (!is.null(user_condition_object) && is.list(user_condition_object) && length(user_condition_object) != 0) {
+                       if (!is.null(user_condition_object$condition_error)) {
+                         return(message_box(
+                           "Invalid cohort condition",
+                           user_condition_object$condition_error,
+                           class = "negative my-10",
+                           closable = TRUE
+                         ))
+                       }
                        runjs(paste0(
                          "$('#", ns("event_searchbar"), "-filter-container').find('.ui.label.filter').each(function(index) {",
                          "       $(this).removeClass('event-error');",
@@ -640,5 +650,4 @@ render_associated_sql_accordion <- function(per_condition, condition_object) {
             active_title = NULL,
             fluid = TRUE)
 }
-
 

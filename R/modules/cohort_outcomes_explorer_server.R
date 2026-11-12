@@ -174,6 +174,9 @@ cohortOutcomesExplorerServer <-
       apply_condition_object <- function(stay_to_filter,
                                          condition_object) {
 
+        if (!is.null(condition_object$condition_error)) {
+          return(list(status = "error", message = condition_object$condition_error))
+        }
         constraint_list <- condition_object$constraint_list
         table_count <- length(constraint_list)
         strat_data <- list()

@@ -17,6 +17,7 @@ filters, or a full MIMIC installation.
 | OR | Two event predicates | Union of stay IDs |
 | EXCLUDE | Predicate matches or is empty | Matching stays are removed from the stay universe |
 | Parentheses | `A AND (B OR C)` | Explicitly enumerated reference stays |
+| Invalid condition | A filter followed by AND or OR with no second operand | Actionable validation message before database queries |
 | Aggregation | SUM over two adjacent hourly windows | Boundary event contributes once |
 | Connection reuse | Repeated database column-type lookups | Reuses the existing connection |
 | Outcomes refresh | Repeated ICD counts across strata | Correct counts; temporary tables are removed |

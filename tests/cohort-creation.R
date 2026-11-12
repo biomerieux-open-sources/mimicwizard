@@ -8,7 +8,10 @@ library(tidyr)
 
 source("R/helpers/database.R")
 source("R/helpers/logical.R")
+source("R/helpers/cohort_config.R")
 source("R/patient_events_server.R")
+source("R/modules/event_searchbar_server.R")
+source("R/cohort_creation_server.R")
 
 dbname <- Sys.getenv("COHORT_TEST_DB")
 if (!identical(dbname, "mimicwizard_cohort_test")) {
@@ -115,6 +118,68 @@ tryCatch({
       cat("FAIL:", name, "-", conditionMessage(e), "\n")
     })
   }
+
+  test("invalid condition chains explain missing operands and parentheses", {
+    filter <- list(type = "filter", itemid = "1")
+    and <- list(type = "condition", element = "AND")
+    or <- list(type = "condition", element = "OR")
+    open <- list(type = "enclose", element = "open")
+    close <- list(type = "enclose", element = "close")
+    invalid <- list(
+      list(chain = list(filter, and), expected = "after AND"),
+      list(chain = list(filter, or), expected = "after OR"),
+      list(chain = list(and, filter), expected = "before AND"),
+      list(chain = list(filter, and, or, filter), expected = "before OR"),
+      list(chain = list(open, close), expected = "Parentheses"),
+      list(chain = list(open, filter, and, close), expected = "after AND"),
+      list(chain = list(open, filter), expected = "opening parenthesis"),
+      list(chain = list(filter, close), expected = "closing parenthesis")
+    )
+    for (case in invalid) {
+      error <- validate_condition_chain(case$chain)
+      if (is.null(error) || !grepl(case$expected, error, fixed = TRUE)) {
+        stop("Incorrect condition validation message for ", case$expected)
+      }
+    }
+    valid <- list(
+      list(), list(filter), list(filter, and, filter),
+      list(filter, filter), list(filter, open, filter, or, filter, close),
+      list(filter, and, open, filter, or, filter, close)
+    )
+    for (chain in valid) {
+      if (!is.null(validate_condition_chain(chain))) stop("A valid condition was rejected.")
+    }
+  })
+  test("search bar rejects trailing AND before querying the database", {
+    inaccessible_database <- reactive({ stop("Unexpected database query") })
+    testServer(eventSearchbarServer, args = list(database = inaccessible_database), {
+      session$setInputs(filter_tojson = jsonlite::toJSON(
+        list(message = "OK", result = list(
+          list(type = "filter", itemid = "1"),
+          list(type = "condition", element = "AND")
+        )), auto_unbox = TRUE
+      ))
+      result <- condition_object()
+      stopifnot(identical(result$condition_error,
+                          "Add an event or parenthesized condition after AND."))
+    })
+    test("invalid cohort condition displays a message and clears stale results", {
+      eventSearchbarServer <- function(...) {
+        reactive(list(condition_error = "Add an event or parenthesized condition after AND."))
+      }
+      message_box <- function(title, message, ...) shiny::div(title, message)
+      selected_profile <- function() NULL
+      testServer(cohortCreationServer, args = list(database = reactive(NULL)), {
+        fetched_cohort(data.frame(subject_id = 1))
+        associated_sql_data(list(old = TRUE))
+        session$setInputs(`event_searchbar-filter_tojson` = "invalid")
+        result <- cohort_details_ui()
+        stopifnot(grepl("Invalid cohort condition", as.character(result), fixed = TRUE),
+                  grepl("after AND", as.character(result), fixed = TRUE),
+                  is.null(fetched_cohort()), is.null(associated_sql_data()))
+      })
+    })
+  })
 
   test("column type lookups reuse the provided database connection", {
     before <- dbGetQuery(con, "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()")$n

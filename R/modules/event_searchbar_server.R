@@ -931,7 +931,7 @@ eventSearchbarServer <-
                        if (length(input$filter_tojson) != 0) {
                          isolate({
                          result_object <-
-                           fromJSON(input$filter_tojson, simplifyVector = FALSE)
+                           jsonlite::fromJSON(input$filter_tojson, simplifyVector = FALSE)
                          if (result_object$message != "OK") {
                            shiny.semantic::toast(
                              message= paste0(
@@ -943,7 +943,10 @@ eventSearchbarServer <-
                            )
                          } else{
                            if(length(result_object$result)>0){
-                             chain_condition_to_condition_object(
+                             validation_error <- validate_condition_chain(result_object$result)
+                             if (!is.null(validation_error)) {
+                               list(condition_error = validation_error)
+                             } else chain_condition_to_condition_object(
                                chain_condition = result_object$result,
                                database = database,
                                icd_to_allow = isolate(input$icd_to_keep),
