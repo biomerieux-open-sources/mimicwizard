@@ -41,6 +41,6 @@ jobs:
       - name: Install PostgreSQL headers
         run: sudo apt-get update && sudo apt-get install -y libpq-dev
       - name: Install test dependencies
-        run: Rscript --vanilla -e 'install.packages(c("DBI", "RPostgres", "dplyr"), repos = "https://cloud.r-project.org")'
+        run: Rscript --vanilla -e 'install.packages(c("DBI", "RPostgres", "dplyr", "dbplyr", "shiny", "shinyjs", "shinycssloaders", "tidyr"), repos = "https://cloud.r-project.org")'
       - name: Run cohort creation matrix
         run: Rscript --vanilla tests/cohort-creation.R

@@ -11,6 +11,7 @@ source("R/helpers/logical.R")
 source("R/helpers/cohort_config.R")
 source("R/patient_events_server.R")
 source("R/modules/event_searchbar_server.R")
+source("R/modules/cohort_outcomes_explorer_server.R")
 source("R/cohort_creation_server.R")
 
 dbname <- Sys.getenv("COHORT_TEST_DB")
@@ -33,8 +34,10 @@ tryCatch({
     "('mimiciv_icu', 'mimiciv_hosp', 'mimiciv_derived')"
   ))
   if (nrow(existing)) stop("Test schemas already exist; refusing to alter this database.")
-  if (dbExistsTable(con, Id(schema = "public", table = "cohort"))) {
-    stop("public.cohort already exists; refusing to alter this database.")
+  for (name in c("cohort", "d_cohorts", "demographics")) {
+    if (dbExistsTable(con, Id(schema = "public", table = name))) {
+      stop("public.", name, " already exists; refusing to alter this database.")
+    }
   }
 
   statements <- c(
@@ -43,7 +46,16 @@ tryCatch({
     "CREATE SCHEMA mimiciv_derived",
     paste("CREATE TABLE public.cohort (cohort_id integer, subject_id integer,",
           "hadm_id integer, stay_id integer)"),
-    "INSERT INTO public.cohort VALUES (1, 1, 11, 101), (2, 2, 22, 201)",
+    paste("INSERT INTO public.cohort VALUES (1, 1, 11, 101), (2, 2, 22, 201),",
+          "(3, 1, 11, 101), (3, 1, 11, 101), (3, 3, 33, NULL)"),
+    "CREATE TABLE public.d_cohorts (cohort_id integer, cohort_name text)",
+    "INSERT INTO public.d_cohorts VALUES (1, 'one'), (2, 'two'), (3, 'three')",
+    paste("CREATE TABLE public.demographics (subject_id integer, hadm_id integer,",
+          "stay_id integer, label text, value text, valueuom text, itemid integer)"),
+    paste("INSERT INTO public.demographics VALUES",
+          "(1, 11, 101, 'age', '50', 'y.o.', 1),",
+          "(1, 11, 101, 'gender', 'F', '', 2),",
+          "(2, 22, 201, 'age', '70', 'y.o.', 1)"),
     paste("CREATE TABLE mimiciv_icu.icustays (subject_id integer, hadm_id integer,",
           "stay_id integer, intime timestamp, outtime timestamp)"),
     paste("CREATE TABLE mimiciv_icu.chartevents (subject_id integer, hadm_id integer,",
@@ -119,6 +131,78 @@ tryCatch({
     })
   }
 
+  test("outcomes spinner preserves UI without hashing it", {
+    ui <- shiny::tagList(shiny::div("Outcomes content"))
+    shinycssloaders::withSpinner(ui, id = "warmup")
+    trace("digest", where = asNamespace("digest"),
+          tracer = quote(stop("Spinner unexpectedly hashed its UI.")), print = FALSE)
+    tryCatch({
+      first_id <- shiny::NS("first")("outcomes_spinner")
+      second_id <- shiny::NS("second")("outcomes_spinner")
+      first <- as.character(cohort_outcomes_spinner(ui, shiny::NS("first")))
+      second <- as.character(cohort_outcomes_spinner(ui, shiny::NS("second")))
+      stopifnot(first_id != second_id,
+                grepl(paste0('data-spinner-id="', first_id, '"'), first, fixed = TRUE),
+                grepl(paste0('data-spinner-id="', second_id, '"'), second, fixed = TRUE),
+                grepl("Outcomes content", first, fixed = TRUE),
+                grepl("Outcomes content", second, fixed = TRUE))
+    }, finally = untrace("digest", where = asNamespace("digest")))
+  })
+
+  test("outcomes do not rerun when the stratification button initializes", {
+    server <- function(input, output, session) {
+      refresh <- cohort_outcomes_refresh(input)
+      selected <- reactive(input$cohort)
+      runs <- reactiveVal(0L)
+      output$result <- renderText({
+        runs(isolate(runs()) + 1L)
+        paste(input$cohort, isolate(runs()))
+      }) %>% bind_cohort_outcomes_events(selected, refresh)
+    }
+    testServer(server, {
+      session$setInputs(cohort = "1")
+      stopifnot(identical(output$result, "1 1"))
+      session$setInputs(execute_stratification = 0)
+      stopifnot(identical(output$result, "1 1"))
+      session$setInputs(execute_stratification = 1)
+      stopifnot(identical(output$result, "1 2"))
+      session$setInputs(execute_stratification = 2)
+      stopifnot(identical(output$result, "1 3"))
+      session$setInputs(cohort = "2")
+      stopifnot(identical(output$result, "2 4"))
+      session$setInputs(execute_stratification = 0)
+      stopifnot(identical(output$result, "2 4"))
+      session$setInputs(execute_stratification = 1)
+      stopifnot(identical(output$result, "2 5"))
+    })
+  })
+
+  test("outcomes module binds cohort changes and explicit stratification requests", {
+    calls <- 0L
+    server <- cohortOutcomesExplorerServer
+    overrides <- new.env(parent = environment(server))
+    overrides$eventSearchbarServer <- function(...) reactive(NULL)
+    overrides$cohort_outcome_query <- function(...) {
+      calls <<- calls + 1L
+      stop("query sentinel")
+    }
+    environment(server) <- overrides
+    selected <- reactiveVal(NULL)
+    testServer(server, args = list(database = reactive(NULL), cohort_id = selected), {
+      result <- function() tryCatch(output$outcomes_result, error = identity)
+      selected("1")
+      session$flushReact()
+      stopifnot(inherits(result(), "error"), calls == 1L)
+      session$setInputs(execute_stratification = 0)
+      stopifnot(inherits(result(), "error"), calls == 1L)
+      session$setInputs(execute_stratification = 1)
+      stopifnot(inherits(result(), "error"), calls == 2L)
+      selected("2")
+      session$flushReact()
+      stopifnot(inherits(result(), "error"), calls == 3L)
+    })
+  })
+
   test("invalid condition chains explain missing operands and parentheses", {
     filter <- list(type = "filter", itemid = "1")
     and <- list(type = "condition", element = "AND")
@@ -178,6 +262,31 @@ tryCatch({
                   grepl("after AND", as.character(result), fixed = TRUE),
                   is.null(fetched_cohort()), is.null(associated_sql_data()))
       })
+      test("ICD filters match prefixes and versions in PostgreSQL", {
+        dbExecute(con, paste(
+          "INSERT INTO mimiciv_hosp.diagnoses_icd VALUES",
+          "(1, 11, 2, 'ABC1', 10), (1, 11, 3, 'DEF1', 10),",
+          "(2, 22, 2, 'ABC2', 10), (3, 33, 1, 'ABC3', 9)"
+        ))
+        cohort <- tibble::tibble(subject_id = 1:3, hadm_id = c(11L, 22L, 33L),
+                                 stay_id = c(101L, 201L, 301L))
+        condition <- function(allow = NULL, deny = NULL, allow_mode = "OR", deny_mode = "OR") {
+          list(icd_to_allow = allow, icd_to_deny = deny,
+               allow_condition = allow_mode, deny_condition = deny_mode)
+        }
+        assert_stays(process_icd_filter(function() con, condition(deny = "10 ABC"), cohort), 301)
+        assert_stays(process_icd_filter(function() con, condition(allow = "10 ABC"), cohort), c(101, 201))
+        assert_stays(process_icd_filter(function() con, condition(deny = "10 ABC,10 DEF",
+                                                                 deny_mode = "AND"), cohort), c(201, 301))
+        assert_stays(process_icd_filter(function() con, condition(allow = "10 ABC,10 DEF",
+                                                                  allow_mode = "AND"), cohort), 101)
+        assert_stays(process_icd_filter(function() con, condition(deny = "9 ABC"), cohort), c(101, 201))
+        assert_stays(process_icd_filter(function() con, condition(deny = "10 ABC'"), cohort), c(101, 201, 301))
+        assert_stays(process_icd_filter(function() con, condition(), cohort), c(101, 201, 301))
+        dbExecute(con, "INSERT INTO mimiciv_hosp.diagnoses_icd VALUES (2, 22, 3, 'ABC9', 10)")
+        assert_stays(process_icd_filter(function() con, condition(deny = "10 ABC,10 DEF",
+                                                                 deny_mode = "AND"), cohort), c(201, 301))
+      })
     })
   })
 
@@ -190,6 +299,132 @@ tryCatch({
     }
     after <- dbGetQuery(con, "SELECT count(*) AS n FROM pg_stat_activity WHERE datname = current_database()")$n
     if (after != before || !dbIsValid(con)) stop("Column type lookup changed the active connection count.")
+  })
+  test("cohort queries keep SQL metadata without printing it", {
+    query <- get_constrained_table
+    test_env <- new.env(parent = environment(query))
+    test_env$check.numeric <- function(x) TRUE
+    environment(query) <- test_env
+    constraint <- list(
+      itemid = 20, field = "valuenum", constraint = "Exist",
+      value = "", aggr = "",
+      time_constraint = list(is_time_constrained = FALSE)
+    )
+    output <- capture.output(result <- query(con, "chartevents", constraint))
+    stopifnot(length(output) == 0L, nrow(result) > 0L,
+              is.character(attr(result, "sql")), is.list(attr(result, "params")))
+    constraint$field <- "not_allowed"
+    error <- tryCatch(query(con, "chartevents", constraint), error = identity)
+    stopifnot(inherits(error, "error"),
+              grepl("not allowed", conditionMessage(error), fixed = TRUE))
+  })
+  test("cohort summary counts preserve distinct and missing ID behavior", {
+    cohort <- dplyr::tbl(con, dbplyr::in_schema("public", "cohort"))
+    for (id in c("1", "2", "3", "999")) {
+      rows <- cohort %>% filter(cohort_id == !!id) %>% collect()
+      expected <- vapply(rows[c("subject_id", "hadm_id", "stay_id")],
+                         function(x) length(unique(x)), integer(1))
+      actual <- get_cohort_explorer_counts(con, id)
+      stopifnot(identical(as.numeric(actual[1, ]), as.numeric(expected)))
+    }
+  })
+  test("whole-cohort outcomes and ICD counts preserve original join results", {
+    d_cohorts <- dplyr::tbl(con, dbplyr::in_schema("public", "d_cohorts"))
+    cohort <- dplyr::tbl(con, dbplyr::in_schema("public", "cohort"))
+    demographics <- dplyr::tbl(con, dbplyr::in_schema("public", "demographics"))
+    for (id in c("1", "2", "3", "999")) {
+      original <- d_cohorts %>%
+        filter(cohort_id == !!id) %>%
+        inner_join(cohort, by = "cohort_id") %>%
+        inner_join(demographics, by = c("subject_id", "hadm_id", "stay_id")) %>%
+        mutate(strat = "Whole Cohort") %>%
+        collect()
+      optimized <- cohort_outcome_query(con, id)
+      stopifnot(identical(colnames(optimized),
+                          c("subject_id", "hadm_id", "stay_id", "label", "value", "valueuom")))
+      columns <- c("subject_id", "hadm_id", "stay_id", "label", "value", "valueuom", "strat")
+      expected <- original %>% select(all_of(columns)) %>% arrange(subject_id, hadm_id, stay_id, label)
+      actual <- optimized %>% collect() %>% mutate(strat = "Whole Cohort") %>%
+        select(all_of(columns)) %>% arrange(subject_id, hadm_id, stay_id, label)
+      stopifnot(isTRUE(all.equal(as.data.frame(actual), as.data.frame(expected), check.attributes = FALSE)))
+      local_icd <- get_cohort_icd_counts(con, original) %>% arrange(icd_code, strat)
+      remote_icd <- get_cohort_icd_counts(con, cohort_icd_admissions_query(con, id)) %>%
+        arrange(icd_code, strat)
+      stopifnot(isTRUE(all.equal(as.data.frame(local_icd), as.data.frame(remote_icd), check.attributes = FALSE)))
+    }
+  })
+  test("outcome rows pair characteristics by stay and retain strata", {
+    data <- tibble::tibble(
+      subject_id = c(1L, 2L, 1L, 1L, 2L, 1L, 1L, 1L, 1L),
+      hadm_id = c(11L, 22L, 11L, 11L, 22L, 11L, 11L, 11L, 11L),
+      stay_id = c(101L, 201L, 102L, 101L, 201L, 101L, 102L, 101L, 101L),
+      strat = c("A", "B", "B", "A", "B", "A", "B", "A", "A"),
+      label = c("age", "gender", "age", "gender", "age", "age", "gender", "age", "age"),
+      value = c("30", "M", NA, "F", "50", "31", "M", "30", NA),
+      valueuom = c("y.o.", "", "y.o.", "", "y.o.", "y.o.", "", "y.o.", "y.o.")
+    )
+    expected <- tibble::tibble(
+      strat = c("A", "B", "B"),
+      `age (y.o.)` = c("30", NA, "50"),
+      `gender ()` = c("F", "M", "M")
+    )
+    actual <- cohort_outcomes_wide(data) %>% select(all_of(names(expected)))
+    reversed <- cohort_outcomes_wide(data[nrow(data):1L, ]) %>%
+      select(all_of(names(expected)))
+    stopifnot(identical(actual, expected), identical(reversed, expected))
+    empty <- cohort_outcomes_wide(data[FALSE, ])
+    stopifnot(nrow(empty) == 0L, identical(names(empty), "strat"))
+    counts <- data %>% group_by(strat) %>%
+      summarise(subjects = n_distinct(subject_id, na.rm = TRUE),
+                admissions = n_distinct(hadm_id, na.rm = TRUE), .groups = "drop")
+    stopifnot(identical(counts$subjects, c(1L, 2L)),
+              identical(counts$admissions, c(1L, 2L)))
+  })
+  test("outcome rows match the previous reshape for aligned unique stays", {
+    data <- tibble::tibble(
+      subject_id = rep(c(1L, 2L), each = 2L),
+      hadm_id = rep(c(11L, 22L), each = 2L),
+      stay_id = rep(c(101L, 201L), each = 2L),
+      strat = "Whole Cohort",
+      label = rep(c("age", "gender"), 2L),
+      value = c("30", "F", "50", "M"),
+      valueuom = rep(c("y.o.", ""), 2L)
+    )
+    previous <- data %>% transmute(strat, label, value, valueuom) %>%
+      group_by(strat, label, valueuom) %>% mutate(rn = row_number()) %>%
+      pivot_wider(names_from = c("label", "valueuom"),
+                  names_glue = "{label} ({valueuom})", values_from = "value") %>%
+      select(-rn) %>% ungroup()
+    actual <- cohort_outcomes_wide(data) %>% select(all_of(names(previous)))
+    stopifnot(identical(actual, previous))
+  })
+  test("database outcomes retain duplicate, missing, and stratified data correctly", {
+    dbExecute(con, "INSERT INTO public.d_cohorts VALUES (4, 'four')")
+    dbExecute(con, paste(
+      "INSERT INTO public.cohort VALUES",
+      "(4, 1, 11, 101), (4, 1, 11, 101), (4, 2, 22, 201)"
+    ))
+    dbExecute(con, paste(
+      "INSERT INTO public.demographics VALUES",
+      "(1, 11, 101, 'age', '35', 'y.o.', 1),",
+      "(1, 11, 101, 'age', NULL, 'y.o.', 1),",
+      "(1, 11, 101, 'missing', NULL, '', 3),",
+      "(2, 22, 201, 'gender', 'M', '', 2)"
+    ))
+    data <- cohort_outcome_query(con, "4") %>% collect() %>%
+      mutate(strat = if_else(stay_id == 101L, "A", "B"))
+    actual <- cohort_outcomes_wide(data) %>%
+      select(strat, `age (y.o.)`, `gender ()`, `missing ()`)
+    expected <- tibble::tibble(
+      strat = c("A", "B"),
+      `age (y.o.)` = c("35", "70"),
+      `gender ()` = c("F", "M"),
+      `missing ()` = c(NA_character_, NA_character_)
+    )
+    stopifnot(identical(actual, expected))
+    icd <- get_cohort_icd_counts(con, data) %>% arrange(strat)
+    stopifnot(identical(icd$strat, c("A", "B")), length(icd$n) == 2L,
+              all(icd$n == 1L))
   })
   test("outcome ICD queries release temporary tables on repeated refresh", {
     population <- tibble::tibble(
@@ -291,6 +526,14 @@ tryCatch({
     assert_stays(apply_cohort_conditions(data, condition_object("condition_1 | condition_2")),
                  c(101, 201, 301))
   })
+  test("OR returns admissions when one input lacks stay identifiers", {
+    admissions <- tibble::tibble(subject_id = 1L, hadm_id = 11L)
+    icu_stays <- tibble::tibble(subject_id = 2L, hadm_id = 22L, stay_id = 201L)
+    for (result in list(orcondition(admissions, icu_stays), orcondition(icu_stays, admissions))) {
+      stopifnot(setequal(result$subject_id, c(1L, 2L)),
+                identical(result$stay_id[result$subject_id == 2L], 201L))
+    }
+  })
   test("EXCLUDE removes matching stays from the universe", {
     assert_stays(apply_cohort_conditions(
       data, condition_object("condition_1 & condition_2", exclude = 2), universe), 101)
@@ -312,8 +555,10 @@ tryCatch({
     }
   })
   test("parentheses select A AND (B OR C)", {
-    assert_stays(apply_cohort_conditions(
-      data, condition_object("condition_1 & ( condition_2 | condition_3 )")), c(101, 201))
+    output <- capture.output(result <- apply_cohort_conditions(
+      data, condition_object("condition_1 & ( condition_2 | condition_3 )")))
+    stopifnot(length(output) == 0L)
+    assert_stays(result, c(101, 201))
   })
   if (length(failures)) stop(length(failures), " cohort test(s) failed.")
   cat("All cohort creation tests passed.\n")
