@@ -677,7 +677,6 @@ eventSearchbarServer <-
                            base_query,
                            ') "q02") "q01"'
                          )
-                         print(sql_query)
                          request <-
                            dplyr::tbl(database(), dplyr::sql(sql_query)) %>% collect()
 
@@ -1029,8 +1028,6 @@ eventSearchbarServer <-
                          ns("constraint-selector"),
                          "', function() {
                        eventTarget = $(this);
-                       console.log(eventTarget)
-                       console.log('Persisted in DOM')
                        let labelId = eventTarget.closest('.ui.popup').attr('linkedlabel');
                        $('#",ns("label"),"-'+labelId+' > .ui.label').html('');
                        eventTarget.parent().parent().find('.",
@@ -1094,7 +1091,6 @@ eventSearchbarServer <-
                        result = htmlToCondition('",
                              ns("filter-container"),
                              "');
-                       console.log(result);
                               //Set up data to shiny here
                        Shiny.setInputValue('",
                              ns('filter_tojson'),
@@ -1112,7 +1108,6 @@ eventSearchbarServer <-
                              ns("filter-container"),
                              "');
                        if(result !== null){
-                       console.log(result)
                                                      //Set up data to shiny here
                        Shiny.setInputValue('",
                              ns('filter_tojson'),

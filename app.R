@@ -32,9 +32,7 @@ library(shinycssloaders)
 library(broom)
 library(cardx)
 source("global.R")
-
 MIMICWIZARD_VERSION <- unname(read.dcf(here::here("DESCRIPTION"), fields = "Version")[1, 1])
-
 plan(sequential)
 options(shiny.maxRequestSize = 500 * 1024 ^ 2) #Max upload size is 500MB
 options(bitmapType = 'cairo')
@@ -449,8 +447,7 @@ server <- function(input, output, session) {
         print("Lost of connection database link, try to reconnect (Error)")
         print(e)
         session$userData$database_keepalive<- tryCatch(
-          {print("Reconnecting")
-            connect_to_mimic()},
+          {connect_to_mimic()},
           error = function(e) {
             print("Failed")
             if(!is.null(w)){
@@ -661,7 +658,6 @@ server <- function(input, output, session) {
   })
 
   http_get_args <- reactive({
-    print("Update clientData$url_search")
     parseQueryString(session$clientData$url_search)
   })
 
@@ -673,7 +669,6 @@ server <- function(input, output, session) {
       choices =  profile_list(),
       selected = 0
     )
-    print("Updated profile_list")
   })
 
 
@@ -699,9 +694,6 @@ server <- function(input, output, session) {
       req(application_mode(),DATABASE_CREATED())
       if(isTruthy(isolate(session_db())) && DATABASE_CREATED()){
         tryCatchLog({
-          print("Loading server")
-          print(CONFIG)
-
           ####
           #     LOAD DISTRIBUTED API IN THE APP
           ####

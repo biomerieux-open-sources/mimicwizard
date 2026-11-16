@@ -138,10 +138,6 @@ patientExplorerServer <-
             ns("select_uid"),
             "', function(value) {
                         data = value.split('&')
-                      console.log(data)
-                      console.log('",
-            ns("subject_id"),
-            "')
                       if(data.length > 0 && data[0].length>0){
                         Shiny.setInputValue('",
             ns("subject_id"),
@@ -1554,7 +1550,6 @@ patientExplorerServer <-
             ns("patient-explorer-container"),
             "', function(e){
                         if(!$(e.target).hasClass('vis-item') && $(e.target).closest('.right-side-div').length == 0){
-                        console.log(e.target)
                           $('.right-side-div.timevis-details').removeClass('visible')
                         }
                      })"
@@ -1571,7 +1566,6 @@ patientExplorerServer <-
                               let currentCard =  $(this).closest('.ui.card')
                                 currentCard.toggleClass('expanded');
                                 let plotId = currentCard.find('.plotly').attr('id');
-                       console.log(plotId)
                                   Plotly.Plots.resize(plotId);
                                 });"
           )
@@ -1585,7 +1579,6 @@ patientExplorerServer <-
             ns("plot_to_remove"),
             "', function() {
                               let plotId = $(this).attr('id');
-                       console.log(plotId);
                               Shiny.setInputValue('",
             ns('plot_to_remove'),
             "', plotId);});"
@@ -1605,14 +1598,8 @@ patientExplorerServer <-
           if (index != 0) {
             card_list$data <- card_list$data[-index]
           } else{
-            print(
-              paste0(
-                "Can't find plot_to_remove (id:",
-                identifier,
-                ") in ",
-                card_list$data
-              )
-            )
+            warning(paste0("Can't find plot_to_remove (id:", identifier, ")"),
+                    call. = FALSE)
           }
         }, domain = session)
 

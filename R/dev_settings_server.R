@@ -9,12 +9,10 @@ devSettingsServer <- function(id, database = NULL) {
       is_previewed <- reactiveVal(FALSE)
 
       observeEvent(input$user_custom_file, {
-        print("file_change")
         is_previewed(FALSE)
       })
 
       previewResult <- eventReactive(input$user_custom_preview_event_action, {
-        print("click")
         is_previewed(TRUE)
         if (input$user_custom_label != "" &
             input$user_custom_abbr != "" & input$user_custom_author != "") {

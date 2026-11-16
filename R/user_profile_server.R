@@ -154,7 +154,6 @@ userProfileServer <- function(id, database = NULL) {
                            })
 
                            observeEvent(input[[paste0("save-",row['user_id'])]], {
-                             print(paste0("UPDATE public.users SET user_itemids='",input[[paste0("list_user_parameter_",row['user_id'])]],"', user_cohorts='",input[[paste0("list_user_cohort_",row['user_id'])]],"' WHERE user_id = ",row['user_id']))
                              dbSendStatement(database(),sql(paste0("UPDATE public.users SET user_itemids='",input[[paste0("list_user_parameter_",row['user_id'])]],"', user_cohorts='",input[[paste0("list_user_cohort_",row['user_id'])]],"' WHERE user_id = ",row['user_id'])),n=-1)
                              shinyjs::runjs("Shiny.setInputValue('update_profile', Date.now());")
                              invalidator(invalidator()+1)
