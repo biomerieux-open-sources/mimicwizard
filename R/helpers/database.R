@@ -212,7 +212,6 @@ connect_to_mimic <- function(waiter = NULL) {
         "Connecting to hosted MIMIC-IV database"
       ))
     }
-    print("Request new db connection")
     drv <- RPostgres::Postgres()
     database <- dbConnect(
       drv,
@@ -621,24 +620,67 @@ get_column_type <- function(field, schema, table, database) {
   as.character(dplyr::tbl(database, sql(column_type_query)) %>% collect())
 }
 
+get_cohort_explorer_counts <- function(database, cohort_id) {
+  result <- DBI::dbGetQuery(database, paste(
+    "SELECT COUNT(DISTINCT subject_id) + CASE WHEN COUNT(*) FILTER (WHERE subject_id IS NULL) > 0 THEN 1 ELSE 0 END AS subjects,",
+    "COUNT(DISTINCT hadm_id) + CASE WHEN COUNT(*) FILTER (WHERE hadm_id IS NULL) > 0 THEN 1 ELSE 0 END AS admissions,",
+    "COUNT(DISTINCT stay_id) + CASE WHEN COUNT(*) FILTER (WHERE stay_id IS NULL) > 0 THEN 1 ELSE 0 END AS stays",
+    "FROM public.cohort WHERE cohort_id = $1"
+  ), params = list(cohort_id))
+  data.frame(
+    "Total subjects" = as.numeric(result$subjects),
+    "Total hadm" = as.numeric(result$admissions),
+    "Total stays" = as.numeric(result$stays),
+    check.names = FALSE
+  )
+}
+
+cohort_members_query <- function(database, cohort_id) {
+  cohorts <- dplyr::tbl(database, dbplyr::in_schema("public", "d_cohorts")) %>%
+    dplyr::filter(cohort_id == !!cohort_id) %>%
+    dplyr::select(cohort_id)
+  cohort <- dplyr::tbl(database, dbplyr::in_schema("public", "cohort")) %>%
+    dplyr::select(cohort_id, subject_id, hadm_id, stay_id)
+  cohorts %>%
+    dplyr::inner_join(cohort, by = "cohort_id")
+}
+
+cohort_outcome_query <- function(database, cohort_id) {
+  demographics <- dplyr::tbl(database, dbplyr::in_schema("public", "demographics")) %>%
+    dplyr::select(subject_id, hadm_id, stay_id, label, value, valueuom)
+  cohort_members_query(database, cohort_id) %>%
+    dplyr::inner_join(demographics, by = c("subject_id", "hadm_id", "stay_id")) %>%
+    dplyr::select(subject_id, hadm_id, stay_id, label, value, valueuom)
+}
+
+cohort_icd_admissions_query <- function(database, cohort_id) {
+  demographics <- dplyr::tbl(database, dbplyr::in_schema("public", "demographics"))
+  cohort_members_query(database, cohort_id) %>%
+    dplyr::semi_join(demographics, by = c("subject_id", "hadm_id", "stay_id")) %>%
+    dplyr::transmute(subject_id, hadm_id, strat = "Whole Cohort") %>%
+    dplyr::distinct()
+}
+
 get_cohort_icd_counts <- function(database, stratified_data) {
-  table_name <- basename(tempfile("mimicwizard_cohort_"))
-  qualified_name <- paste0("pg_temp.", DBI::dbQuoteIdentifier(database, table_name))
-  exists <- DBI::dbGetQuery(database, "SELECT to_regclass($1) IS NOT NULL AS present",
-                            params = list(qualified_name))$present
-  if (exists) {
-    stop("Temporary cohort table already exists: ", table_name)
-  }
-  on.exit({
-    DBI::dbExecute(database, paste("DROP TABLE IF EXISTS", qualified_name))
-  }, add = TRUE)
   cohort_admissions <- stratified_data %>%
     dplyr::select(subject_id, hadm_id, strat) %>%
     dplyr::distinct()
-  cohort_admissions <- dplyr::copy_to(
-    database, cohort_admissions, name = table_name, temporary = TRUE,
-    in_transaction = FALSE
-  )
+  if (!inherits(cohort_admissions, "tbl_sql")) {
+    table_name <- basename(tempfile("mimicwizard_cohort_"))
+    qualified_name <- paste0("pg_temp.", DBI::dbQuoteIdentifier(database, table_name))
+    exists <- DBI::dbGetQuery(database, "SELECT to_regclass($1) IS NOT NULL AS present",
+                              params = list(qualified_name))$present
+    if (exists) {
+      stop("Temporary cohort table already exists: ", table_name)
+    }
+    on.exit({
+      DBI::dbExecute(database, paste("DROP TABLE IF EXISTS", qualified_name))
+    }, add = TRUE)
+    cohort_admissions <- dplyr::copy_to(
+      database, cohort_admissions, name = table_name, temporary = TRUE,
+      in_transaction = FALSE
+    )
+  }
   diagnoses <- dplyr::tbl(database, dbplyr::in_schema("mimiciv_hosp", "diagnoses_icd"))
   dictionary <- dplyr::tbl(database, dbplyr::in_schema("mimiciv_hosp", "d_icd_diagnoses"))
   diagnoses %>%
@@ -687,7 +729,6 @@ get_constrained_table <-
             cohort_filter,
             database
           )
-        print(query)
         result <- dbGetQuery(database, query$sql, params = query$params)
         attr(result, "sql") <- query$sql
         attr(result, "params") <- query$params
@@ -784,7 +825,6 @@ request_constrained <-
               ),
               packages = c("dplyr", "dbplyr", "DBI"),
               {
-                start.time <- Sys.time()
                 dedicated_db_link <- connect_to_mimic()
                 data <- tryCatch(
                   get_constrained_table(
@@ -796,9 +836,6 @@ request_constrained <-
                   finally = DBI::dbDisconnect(dedicated_db_link)
                 )
 
-                end.time <- Sys.time()
-                time.taken <- end.time - start.time
-                print(paste("request time :", time.taken))
                 data
               }
             ) %>% then(if (!is.null(progress)) {
@@ -1372,9 +1409,33 @@ request_compressed_events <-
   }
 
 
+get_matching_icd_admissions <- function(database, codes, condition, exclusion = FALSE) {
+  if (!condition %in% c("AND", "OR")) {
+    stop("ICD condition must be AND or OR.")
+  }
+  placeholders <- vapply(seq_len(nrow(codes)), function(i) {
+    paste0("($", 2L * i - 1L, "::text, $", 2L * i, "::text, ", i, ")")
+  }, character(1))
+  params <- unlist(lapply(seq_len(nrow(codes)), function(i) {
+    list(as.character(codes$icd_version[i]), as.character(codes$icd_code[i]))
+  }), recursive = FALSE)
+  query <- paste0(
+    "SELECT ", if (exclusion && condition == "OR") "DISTINCT " else "",
+    "d.subject_id, d.hadm_id FROM mimiciv_hosp.diagnoses_icd d ",
+    "JOIN (VALUES ", paste(placeholders, collapse = ", "), ") AS f(icd_version, icd_code, filter_id) ",
+    "ON d.icd_version::text = f.icd_version AND starts_with(d.icd_code, f.icd_code)"
+  )
+  if (condition == "AND") {
+    count_expression <- if (exclusion) "COUNT(DISTINCT f.filter_id)" else "COUNT(*)"
+    query <- paste0(query, " GROUP BY d.subject_id, d.hadm_id HAVING ", count_expression, " = ",
+                    as.integer(nrow(codes)))
+  }
+  DBI::dbGetQuery(database, query, params = params)
+}
+
 process_icd_filter <- function(database,user_condition_object,subset_to_filter){
-  allow_strings <- unlist(strsplit(user_condition_object$icd_to_allow, "[ ,]"))
-  deny_strings <- unlist(strsplit(user_condition_object$icd_to_deny, "[ ,]"))
+  allow_strings <- unlist(strsplit(if (is.null(user_condition_object$icd_to_allow)) "" else user_condition_object$icd_to_allow, "[ ,]"))
+  deny_strings <- unlist(strsplit(if (is.null(user_condition_object$icd_to_deny)) "" else user_condition_object$icd_to_deny, "[ ,]"))
 
   query_icd_allow <- tibble(
     icd_code = allow_strings[c(FALSE, TRUE)],
@@ -1386,41 +1447,15 @@ process_icd_filter <- function(database,user_condition_object,subset_to_filter){
   )
 
   if(!all(is.na(query_icd_allow))){
-    icd_filter_allow <- dplyr::tbl(database(), in_schema("mimiciv_hosp", "diagnoses_icd")) %>%
-      {
-        if(user_condition_object$allow_condition == "OR"){
-          cross_join(.,query_icd_allow,suffix = c(".a", ".b"),copy=TRUE) %>%
-            collect() %>%
-            filter(startsWith(icd_code.a, icd_code.b) & icd_version.a == icd_version.b)
-        } else{
-          cross_join(.,query_icd_allow,suffix = c(".a", ".b"),copy=TRUE) %>%
-            collect() %>%
-            filter(startsWith(icd_code.a, icd_code.b) & icd_version.a == icd_version.b) %>%
-            group_by(subject_id,hadm_id) %>%
-            summarise(match_count = n()) %>%
-            filter(match_count == nrow(query_icd_allow))
-        }
-      } %>%
-      select(subject_id,hadm_id)
+    icd_filter_allow <- get_matching_icd_admissions(
+      database(), query_icd_allow, user_condition_object$allow_condition
+    )
   }
 
   if(!all(is.na(query_icd_deny))){
-    icd_filter_deny <- dplyr::tbl(database(), in_schema("mimiciv_hosp", "diagnoses_icd")) %>%
-      {
-        if(user_condition_object$deny_condition == "OR"){
-          cross_join(.,query_icd_deny,suffix = c(".a", ".b"),copy=TRUE) %>%
-            collect() %>%
-            filter(startsWith(icd_code.a, icd_code.b) & icd_version.a == icd_version.b)
-        } else{
-          cross_join(.,query_icd_deny,suffix = c(".a", ".b"),copy=TRUE) %>%
-            collect() %>%
-            filter(startsWith(icd_code.a, icd_code.b) & icd_version.a == icd_version.b)
-          group_by(subject_id,hadm_id) %>%
-            summarise(match_count = n()) %>%
-            filter(match_count == nrow(query_icd_deny))
-        }
-      } %>%
-      select(subject_id,hadm_id)
+    icd_filter_deny <- get_matching_icd_admissions(
+      database(), query_icd_deny, user_condition_object$deny_condition, exclusion = TRUE
+    )
   }
 
 

@@ -178,10 +178,8 @@ cohortCreationServer <- function(id, database = NULL) {
                        progress <- Progress$new(session, min = 0, max = 7)
                        progress$set(message = 'Generating request')
                        progress$set(value = 1, message = 'Requesting database')
-                       print("Step 1 Generate")
                        promise_list <-
                          request_constrained(user_condition_object, progress)
-                       print("Step 2 Resolve")
                        settled_list <- lapply(names(promise_list), function(key) {
                          promise_list[[key]] %>%
                            then(
@@ -191,8 +189,6 @@ cohortCreationServer <- function(id, database = NULL) {
                        })
                        names(settled_list) <- names(promise_list)
                        promise_all(.list = settled_list)  %...>% (function(results) {
-                       print("Step 3 All is resolved")
-
                          errors <- Filter(function(r) r$status == "error", results)
 
                          if (length(errors) > 0) {
@@ -248,11 +244,11 @@ cohortCreationServer <- function(id, database = NULL) {
                            condition_object = user_condition_object
                          ))
 
-                         start.time <- Sys.time()
                          # Check if any condition uses exclusion
                          has_exclusion <- any(sapply(user_condition_object$constraint_list, function(c) isTRUE(c$constraint$is_exclusion)))
                          universe <- NULL
                          if (has_exclusion) {
+                           progress$set(value = 3, message = 'Loading exclusion population')
                            universe <- dplyr::tbl(database(), in_schema("public", "demographics")) %>%
                              select(subject_id, hadm_id, stay_id) %>%
                              distinct() %>%
@@ -263,6 +259,7 @@ cohortCreationServer <- function(id, database = NULL) {
                          progress$set(value = 5, message = 'Applying ICD filters')
                          icd_filtered_result <- process_icd_filter(database,user_condition_object,result)
 
+                         progress$set(value = 5, message = 'Loading cohort details')
                          admissions <-
                            dplyr::tbl(database(), in_schema("mimiciv_hosp", "admissions"))
                          selected_cohort <-
@@ -277,9 +274,6 @@ cohortCreationServer <- function(id, database = NULL) {
                                   admittime,
                                   anchor_year) %>%
                            collect()
-                         end.time <- Sys.time()
-                         time.taken <- end.time - start.time
-                         print(paste("Process result time :",time.taken))
                          progress$set(value = 6, message = 'Computing stats about the fetched cohort')
 
 
@@ -337,7 +331,6 @@ cohortCreationServer <- function(id, database = NULL) {
                                                                          "%Y")) - anchor_year) %>%
                            summarise(mean_age = mean(age),
                                      median_age = median(age)) %>% mutate(mean_age = round(mean_age, 2)) %>% rename("Mean age" = mean_age, "Median age" = median_age)
-
                          summary <-
                            bind_cols(
                              count_subject,
@@ -650,4 +643,3 @@ render_associated_sql_accordion <- function(per_condition, condition_object) {
             active_title = NULL,
             fluid = TRUE)
 }
-
