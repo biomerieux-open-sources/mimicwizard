@@ -239,7 +239,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    (SELECT endtime FROM mimiciv_derived.icustay_hourly ih WHERE ih.stay_id = i.stay_id ORDER BY stay_id,hr DESC LIMIT 1) AS charttime,
+    (SELECT endtime - interval '1 minute' FROM mimiciv_derived.icustay_hourly ih WHERE ih.stay_id = i.stay_id ORDER BY stay_id,hr DESC LIMIT 1) AS charttime,
     11 AS itemid,
     'Death in ICU'::text AS label,
         CASE
@@ -254,7 +254,7 @@ UNION
  SELECT i.subject_id,
     i.hadm_id,
     i.stay_id,
-    admissions.dischtime AS charttime,
+    admissions.dischtime - interval '1 minute' AS charttime,
     12 AS itemid,
     'Death in Hospital'::text AS label,
         CASE
