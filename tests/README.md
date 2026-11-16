@@ -48,6 +48,11 @@ behavior, which can differ when an admission has duplicate prefix matches.
 
 ## Running locally
 
+On Debian/Ubuntu, install `libpq-dev` and `libuv1-dev` before installing the R
+packages from source. These provide PostgreSQL and libuv headers; `fs`, a
+transitive Shiny dependency, requires libuv. CI installs these system dependencies
+and checks that all required R packages load before running the matrix.
+
 Install R packages `DBI`, `RPostgres`, `dplyr`, `dbplyr`, `shiny`, `shinyjs`,
 `shinycssloaders`, and `tidyr`. Create an **empty,
 disposable** PostgreSQL database named `mimicwizard_cohort_test`, then run:

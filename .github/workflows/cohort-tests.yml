@@ -38,9 +38,16 @@ jobs:
         with:
           r-version: '4.4'
           use-public-rspm: true
-      - name: Install PostgreSQL headers
-        run: sudo apt-get update && sudo apt-get install -y libpq-dev
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libpq-dev libuv1-dev
       - name: Install test dependencies
-        run: Rscript --vanilla -e 'install.packages(c("DBI", "RPostgres", "dplyr", "dbplyr", "shiny", "shinyjs", "shinycssloaders", "tidyr"), repos = "https://cloud.r-project.org")'
+        shell: Rscript --vanilla {0}
+        run: |
+          packages <- c("DBI", "RPostgres", "dplyr", "dbplyr", "shiny", "shinyjs", "shinycssloaders", "tidyr")
+          install.packages(packages, repos = "https://cloud.r-project.org")
+          missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+          if (length(missing)) {
+            stop("Test dependencies failed to install or load: ", paste(missing, collapse = ", "))
+          }
       - name: Run cohort creation matrix
         run: Rscript --vanilla tests/cohort-creation.R
