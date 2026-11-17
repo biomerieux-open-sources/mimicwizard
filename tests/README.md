@@ -68,7 +68,3 @@ transaction and rolled back, including on test failure. The runner refuses a
 different database name, pre-existing MIMIC schemas, or existing
 `public.cohort`, `public.d_cohorts`, or `public.demographics` tables. Never
 point it at a production database.
-
-To make the GitHub check mandatory, configure a repository branch protection
-rule or ruleset requiring the `cohort-tests` job; a workflow alone cannot enable
-branch protection.
