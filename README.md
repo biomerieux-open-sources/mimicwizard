@@ -52,13 +52,20 @@ To update the version displayed by the application, change the `Version` field
 in [DESCRIPTION](DESCRIPTION). Both the startup screen and dashboard use it.
 GitHub release tags and the changelog are maintained separately.
 
+**v1.2** (2026-11-17)
+General:
+- fix : massive optimization for cohort loading
+- test : add cohort creation testing to prevent features regression
+
+Cohort creation  :
+- fix: Death in ICU paramter is now usable with hourly restriction
+
 **v1.1.1** (2026-11-10)
 Dev settings :
 - fix : MIMICWizard now return an error when we enter a csv file with the wrong column name or format
 
 Cohort creation  :
 - fix: hourly restriction are now upper exclusive to prevent an event to be affected to 2 differents windows
-
 
 **v1.1** (2026-07-27)
 
