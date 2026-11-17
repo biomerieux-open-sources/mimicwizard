@@ -2,6 +2,9 @@ patientExplorerServer <-
   function(id,
            database = NULL,
            cohort_id = -1) {
+    if (!is.reactive(cohort_id)) {
+      cohort_id <- reactiveVal(cohort_id)
+    }
     moduleServer(id, function(input, output, session) {
       ns <- session$ns
       if (!is.null(database)) {
@@ -23,7 +26,8 @@ patientExplorerServer <-
 
 
         uid_list <- reactive({
-          if (isTruthy(cohort_id) && cohort_id == -1) {
+          selected_cohort_id <- cohort_id()
+          if (isTruthy(selected_cohort_id) && selected_cohort_id == -1) {
             ifelse(!dir.exists(paste0(
               CONFIG$CACHE_DIR, "cache/patient_events/"
             )),
@@ -55,11 +59,11 @@ patientExplorerServer <-
               )
             }
 
-          } else if (isTruthy(cohort_id) &&
-                     cohort_id != -1) {
+          } else if (isTruthy(selected_cohort_id) &&
+                     selected_cohort_id != -1) {
             uid_list <-
               dplyr::tbl(database(), in_schema("public", "cohort")) %>%
-              filter(cohort_id == !!cohort_id) %>%
+              filter(cohort_id == !!selected_cohort_id) %>%
               collect() %>%
               pivot_longer(
                 c("subject_id", "hadm_id", "stay_id"),
@@ -101,11 +105,12 @@ patientExplorerServer <-
           }
         }
 
-        search_api_url_uid <-
+        search_api_url_uid <- reactive({
           custom_register_search(session, uid_list(), search_api_uid, "search_api_uid")
+        })
 
         output$select_uid <- renderUI({
-          if (!is.reactive(cohort_id) || isTruthy(cohort_id)) {
+          if (isTruthy(cohort_id())) {
             http_get_args <- parseQueryString(session$clientData$url_search)
             if (!is.null(http_get_args[['subject_id']]) &
                 !is.null(http_get_args[['hadm_id']])) {
@@ -118,7 +123,7 @@ patientExplorerServer <-
                 tags$label(
                   "Direct search with a UID (subject_id,hadm_id or stay_id)"
                 ),
-                search_selection_api(ns("uid"), search_api_url_uid, multiple = FALSE)
+                search_selection_api(ns("uid"), search_api_url_uid(), multiple = FALSE)
               ))
 
             }
@@ -133,10 +138,6 @@ patientExplorerServer <-
             ns("select_uid"),
             "', function(value) {
                         data = value.split('&')
-                      console.log(data)
-                      console.log('",
-            ns("subject_id"),
-            "')
                       if(data.length > 0 && data[0].length>0){
                         Shiny.setInputValue('",
             ns("subject_id"),
@@ -198,16 +199,17 @@ patientExplorerServer <-
         ####
         #-------------------------------------------------------------------------------------------------------#
         subject_id_list <- reactive({
-          if (isTruthy(cohort_id) && cohort_id == -1) {
+          selected_cohort_id <- cohort_id()
+          if (isTruthy(selected_cohort_id) && selected_cohort_id == -1) {
             subject_id_list <-
               dplyr::tbl(database(), in_schema("mimiciv_hosp", "patients")) %>%
               select("subject_id") %>%
               collect()
-          } else if (isTruthy(cohort_id) &&
-                     cohort_id != -1) {
+          } else if (isTruthy(selected_cohort_id) &&
+                     selected_cohort_id != -1) {
             subject_id_list <-
               dplyr::tbl(database(), in_schema("public", "cohort")) %>%
-              filter(cohort_id == !!cohort_id) %>% select("subject_id") %>% distinct() %>%
+              filter(cohort_id == !!selected_cohort_id) %>% select("subject_id") %>% distinct() %>%
               collect()
 
           } else{
@@ -287,8 +289,7 @@ patientExplorerServer <-
 
 
         output$select_patient <- renderUI({
-          if (!is.reactive(cohort_id) ||
-              isTruthy(cohort_id)) {
+          if (isTruthy(cohort_id())) {
             http_get_args <- parseQueryString(session$clientData$url_search)
             if (!is.null(http_get_args[['subject_id']]) &
                 !is.null(http_get_args[['hadm_id']])) {
@@ -319,6 +320,7 @@ patientExplorerServer <-
 
 
         output$select_hadm <- renderUI({
+          selected_cohort_id <- cohort_id()
           http_get_args <- parseQueryString(session$clientData$url_search)
           if (!is.null(http_get_args[['subject_id']]) &
               !is.null(http_get_args[['hadm_id']])) {
@@ -328,7 +330,7 @@ patientExplorerServer <-
             admissions <-
               dplyr::tbl(database(),
                          in_schema("mimiciv_hosp", "admissions"))
-            if (cohort_id == -1) {
+            if (isTruthy(selected_cohort_id) && selected_cohort_id == -1) {
               request <-
                 paste0(
                   'select hadm_id, admission_type,COUNT(stay_id) as "total_stay"
@@ -343,7 +345,7 @@ patientExplorerServer <-
               selected_patient_hadm_id_list <-
                 dplyr::tbl(database(), sql(request)) %>% collect()
 
-            } else if (isTruthy(cohort_id)) {
+            } else if (isTruthy(selected_cohort_id)) {
               request <-
                 paste0(
                   'select hadm_id, admission_type,COUNT(stay_id) as "total_stay"
@@ -353,7 +355,7 @@ patientExplorerServer <-
                              where subject_id = ',
                   input$subject_id,
                   ' AND cohort_id = ',
-                  cohort_id,
+                  selected_cohort_id,
                   '
                              group by hadm_id, admission_type
                              limit 100'
@@ -421,6 +423,7 @@ patientExplorerServer <-
 
         output$select_stay <-
           renderUI({
+            selected_cohort_id <- cohort_id()
             http_get_args <- parseQueryString(session$clientData$url_search)
             if (!is.null(http_get_args[['subject_id']]) &
                 !is.null(http_get_args[['hadm_id']])) {
@@ -459,20 +462,20 @@ patientExplorerServer <-
             } else{
               req(input$subject_id, input$hadm_id)
 
-              if (cohort_id == -1) {
+              if (isTruthy(selected_cohort_id) && selected_cohort_id == -1) {
                 selected_hadm_stay_id_list <-
                   dplyr::tbl(database(), in_schema("mimiciv_icu", "icustays")) %>%
                   filter(subject_id == !!input$subject_id &
                            hadm_id == !!input$hadm_id) %>%
                   select("stay_id") %>%
                   collect()
-              } else if (isTruthy(cohort_id)) {
+              } else if (isTruthy(selected_cohort_id)) {
                 selected_hadm_stay_id_list <-
                   dplyr::tbl(database(), in_schema("public", "cohort")) %>%
                   filter(
                     subject_id == !!input$subject_id &&
                       hadm_id == !!input$hadm_id &&
-                      cohort_id == !!cohort_id
+                      cohort_id == !!selected_cohort_id
                   ) %>%
                   select("stay_id") %>%
                   collect()
@@ -927,7 +930,7 @@ patientExplorerServer <-
         # Item id to show on timeline
 
         timeline_itemid_list <-
-          reactiveValues(data = unlist(default_itemid()))
+          reactiveValues(data = unlist(isolate(default_itemid())))
 
         observe({
           timeline_itemid_list$data <- unlist(default_itemid())
@@ -1277,7 +1280,7 @@ patientExplorerServer <-
 
         # Default cards to show
 
-        default_cards <- default_itemid()
+        default_cards <- isolate(default_itemid())
 
         # Reactive container for itemid in cards
 
@@ -1322,6 +1325,14 @@ patientExplorerServer <-
         })
 
         downloadCache <- reactiveVal(NULL)
+
+        observeEvent(cohort_id(), {
+          timeline_itemid_list$data <- unlist(isolate(default_itemid()))
+          card_list$data <- isolate(default_itemid())
+          timeline_data(NULL)
+          selected_event(NULL)
+          downloadCache(NULL)
+        }, ignoreInit = TRUE)
 
         # Cards (graph container) + graph generation
         output$cards <- renderUI({
@@ -1539,7 +1550,6 @@ patientExplorerServer <-
             ns("patient-explorer-container"),
             "', function(e){
                         if(!$(e.target).hasClass('vis-item') && $(e.target).closest('.right-side-div').length == 0){
-                        console.log(e.target)
                           $('.right-side-div.timevis-details').removeClass('visible')
                         }
                      })"
@@ -1556,7 +1566,6 @@ patientExplorerServer <-
                               let currentCard =  $(this).closest('.ui.card')
                                 currentCard.toggleClass('expanded');
                                 let plotId = currentCard.find('.plotly').attr('id');
-                       console.log(plotId)
                                   Plotly.Plots.resize(plotId);
                                 });"
           )
@@ -1570,7 +1579,6 @@ patientExplorerServer <-
             ns("plot_to_remove"),
             "', function() {
                               let plotId = $(this).attr('id');
-                       console.log(plotId);
                               Shiny.setInputValue('",
             ns('plot_to_remove'),
             "', plotId);});"
@@ -1590,14 +1598,8 @@ patientExplorerServer <-
           if (index != 0) {
             card_list$data <- card_list$data[-index]
           } else{
-            print(
-              paste0(
-                "Can't find plot_to_remove (id:",
-                identifier,
-                ") in ",
-                card_list$data
-              )
-            )
+            warning(paste0("Can't find plot_to_remove (id:", identifier, ")"),
+                    call. = FALSE)
           }
         }, domain = session)
 

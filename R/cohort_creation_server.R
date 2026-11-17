@@ -157,8 +157,18 @@ cohortCreationServer <- function(id, database = NULL) {
                    # Keep heavy query execution bound to fresh filter_tojson payloads
                    # produced by explicit Fetch clicks in non-realtime mode.
                    cohort_details_ui <- eventReactive(input[["event_searchbar-filter_tojson"]], {
+                     fetched_cohort(NULL)
+                     associated_sql_data(NULL)
                      user_condition_object <- condition_object()
                      if (!is.null(user_condition_object) && is.list(user_condition_object) && length(user_condition_object) != 0) {
+                       if (!is.null(user_condition_object$condition_error)) {
+                         return(message_box(
+                           "Invalid cohort condition",
+                           user_condition_object$condition_error,
+                           class = "negative my-10",
+                           closable = TRUE
+                         ))
+                       }
                        runjs(paste0(
                          "$('#", ns("event_searchbar"), "-filter-container').find('.ui.label.filter').each(function(index) {",
                          "       $(this).removeClass('event-error');",
@@ -168,10 +178,8 @@ cohortCreationServer <- function(id, database = NULL) {
                        progress <- Progress$new(session, min = 0, max = 7)
                        progress$set(message = 'Generating request')
                        progress$set(value = 1, message = 'Requesting database')
-                       print("Step 1 Generate")
                        promise_list <-
                          request_constrained(user_condition_object, progress)
-                       print("Step 2 Resolve")
                        settled_list <- lapply(names(promise_list), function(key) {
                          promise_list[[key]] %>%
                            then(
@@ -181,8 +189,6 @@ cohortCreationServer <- function(id, database = NULL) {
                        })
                        names(settled_list) <- names(promise_list)
                        promise_all(.list = settled_list)  %...>% (function(results) {
-                       print("Step 3 All is resolved")
-
                          errors <- Filter(function(r) r$status == "error", results)
 
                          if (length(errors) > 0) {
@@ -238,38 +244,22 @@ cohortCreationServer <- function(id, database = NULL) {
                            condition_object = user_condition_object
                          ))
 
-                         start.time <- Sys.time()
                          # Check if any condition uses exclusion
                          has_exclusion <- any(sapply(user_condition_object$constraint_list, function(c) isTRUE(c$constraint$is_exclusion)))
                          universe <- NULL
                          if (has_exclusion) {
+                           progress$set(value = 3, message = 'Loading exclusion population')
                            universe <- dplyr::tbl(database(), in_schema("public", "demographics")) %>%
                              select(subject_id, hadm_id, stay_id) %>%
                              distinct() %>%
                              collect()
                          }
-                         for(key in names(data)){
-                           condition_idx <- gsub("condition_", "", key)
-                           d <- data[[key]]
-                           if (isTRUE(user_condition_object$constraint_list[[condition_idx]]$constraint$is_exclusion)) {
-                             # Pre-compute complement: stays in universe NOT matching this condition
-                             join_by <- if (!("stay_id" %in% names(d)) || is.null(d$stay_id[1])) {
-                               c("subject_id", "hadm_id")
-                             } else {
-                               c("subject_id", "hadm_id", "stay_id")
-                             }
-                             d <- anti_join(universe, d, by = join_by)
-                           }
-                           assign(key, d)
-                         }
-                         escaped_expression <- parsecondition(user_condition_object$condition_string)
-                         expression_to_eval <- gsub("[","(",escaped_expression,fixed=T)
-                         expression_to_eval <- gsub("]",")",expression_to_eval,fixed=T)
                          progress$set(value = 4, message = 'Applying logic between filters')
-                         result <- eval(parse(text=expression_to_eval))
+                         result <- apply_cohort_conditions(data, user_condition_object, universe)
                          progress$set(value = 5, message = 'Applying ICD filters')
                          icd_filtered_result <- process_icd_filter(database,user_condition_object,result)
 
+                         progress$set(value = 5, message = 'Loading cohort details')
                          admissions <-
                            dplyr::tbl(database(), in_schema("mimiciv_hosp", "admissions"))
                          selected_cohort <-
@@ -284,9 +274,6 @@ cohortCreationServer <- function(id, database = NULL) {
                                   admittime,
                                   anchor_year) %>%
                            collect()
-                         end.time <- Sys.time()
-                         time.taken <- end.time - start.time
-                         print(paste("Process result time :",time.taken))
                          progress$set(value = 6, message = 'Computing stats about the fetched cohort')
 
 
@@ -344,7 +331,6 @@ cohortCreationServer <- function(id, database = NULL) {
                                                                          "%Y")) - anchor_year) %>%
                            summarise(mean_age = mean(age),
                                      median_age = median(age)) %>% mutate(mean_age = round(mean_age, 2)) %>% rename("Mean age" = mean_age, "Median age" = median_age)
-
                          summary <-
                            bind_cols(
                              count_subject,
@@ -657,6 +643,3 @@ render_associated_sql_accordion <- function(per_condition, condition_object) {
             active_title = NULL,
             fluid = TRUE)
 }
-
-
-

@@ -32,7 +32,7 @@ library(shinycssloaders)
 library(broom)
 library(cardx)
 source("global.R")
-
+MIMICWIZARD_VERSION <- unname(read.dcf(here::here("DESCRIPTION"), fields = "Version")[1, 1])
 plan(sequential)
 options(shiny.maxRequestSize = 500 * 1024 ^ 2) #Max upload size is 500MB
 options(bitmapType = 'cairo')
@@ -69,7 +69,7 @@ ui <- tagList({
         class = "title",
         icon("hat wizard"),
         span("MIMICWizard"),
-        tags$small("1.1.1"),
+        tags$small(MIMICWIZARD_VERSION),
         div("A MIMIC-IV explorer for non technical users", class = "subtitle")
       ),
       div(
@@ -108,7 +108,7 @@ ui <- tagList({
     title = tags$span(
       icon("hat wizard"),
       "MIMIC Wizard",
-      tags$small("1.1.1", style = "font-size:0.5em")
+      tags$small(MIMICWIZARD_VERSION, style = "font-size:0.5em")
     ),
     center = uiOutput("demo_top_label"),
     right = tagList(
@@ -447,8 +447,7 @@ server <- function(input, output, session) {
         print("Lost of connection database link, try to reconnect (Error)")
         print(e)
         session$userData$database_keepalive<- tryCatch(
-          {print("Reconnecting")
-            connect_to_mimic()},
+          {connect_to_mimic()},
           error = function(e) {
             print("Failed")
             if(!is.null(w)){
@@ -659,7 +658,6 @@ server <- function(input, output, session) {
   })
 
   http_get_args <- reactive({
-    print("Update clientData$url_search")
     parseQueryString(session$clientData$url_search)
   })
 
@@ -671,7 +669,6 @@ server <- function(input, output, session) {
       choices =  profile_list(),
       selected = 0
     )
-    print("Updated profile_list")
   })
 
 
@@ -697,9 +694,6 @@ server <- function(input, output, session) {
       req(application_mode(),DATABASE_CREATED())
       if(isTruthy(isolate(session_db())) && DATABASE_CREATED()){
         tryCatchLog({
-          print("Loading server")
-          print(CONFIG)
-
           ####
           #     LOAD DISTRIBUTED API IN THE APP
           ####

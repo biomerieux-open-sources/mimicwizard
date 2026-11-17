@@ -48,6 +48,10 @@ More information about the application and usage are available on the [ReadTheDo
 
 ### 📦 Changelog
 
+To update the version displayed by the application, change the `Version` field
+in [DESCRIPTION](DESCRIPTION). Both the startup screen and dashboard use it.
+GitHub release tags and the changelog are maintained separately.
+
 **v1.1.1** (2026-11-10)
 Dev settings :
 - fix : MIMICWizard now return an error when we enter a csv file with the wrong column name or format
@@ -135,6 +139,9 @@ This application was developed by the **Laboratoire Commun de Recherche - HCL-bi
 ### 🤝 Contributing
 
 We welcome contributions from the community! To contribute:
+
+The [cohort creation regression matrix](tests/README.md) runs on pull requests
+and describes how to run it locally.
 
 1.  Open a issue about your concerns, problems or feature proposal
 2.  Fork the repository and open a Pull Request with your code suggestion

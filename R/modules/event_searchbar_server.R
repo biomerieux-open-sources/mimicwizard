@@ -677,7 +677,6 @@ eventSearchbarServer <-
                            base_query,
                            ') "q02") "q01"'
                          )
-                         print(sql_query)
                          request <-
                            dplyr::tbl(database(), dplyr::sql(sql_query)) %>% collect()
 
@@ -752,6 +751,7 @@ eventSearchbarServer <-
                          if (is.null(value)) {
                            #For large/complex requesting, use a dedicated db connection to not freeze app
                            dedicated_db_link <- connect_to_mimic()
+                           tryCatch({
                            table_schema <-
                              get_table_schema(param_info[["linksto"]])
                            table <-
@@ -795,7 +795,7 @@ eventSearchbarServer <-
                                select(!!eval(selected_field)) %>%
                                head(100) %>% collect()
                              column_type <-
-                               get_column_type(selected_field, table_schema, param_info[["linksto"]])
+                               get_column_type(selected_field, table_schema, param_info[["linksto"]], dedicated_db_link)
                              if (!(column_type %in% list("character varying","text"))) {
                                value <-
                                  numeric_preview(
@@ -859,8 +859,8 @@ eventSearchbarServer <-
                                  ".Rda"
                                )
                              )
-                             dbDisconnect(dedicated_db_link)
                            }
+                           }, finally = DBI::dbDisconnect(dedicated_db_link))
 
                          }
 
@@ -930,7 +930,7 @@ eventSearchbarServer <-
                        if (length(input$filter_tojson) != 0) {
                          isolate({
                          result_object <-
-                           fromJSON(input$filter_tojson, simplifyVector = FALSE)
+                           jsonlite::fromJSON(input$filter_tojson, simplifyVector = FALSE)
                          if (result_object$message != "OK") {
                            shiny.semantic::toast(
                              message= paste0(
@@ -942,7 +942,10 @@ eventSearchbarServer <-
                            )
                          } else{
                            if(length(result_object$result)>0){
-                             chain_condition_to_condition_object(
+                             validation_error <- validate_condition_chain(result_object$result)
+                             if (!is.null(validation_error)) {
+                               list(condition_error = validation_error)
+                             } else chain_condition_to_condition_object(
                                chain_condition = result_object$result,
                                database = database,
                                icd_to_allow = isolate(input$icd_to_keep),
@@ -1025,8 +1028,6 @@ eventSearchbarServer <-
                          ns("constraint-selector"),
                          "', function() {
                        eventTarget = $(this);
-                       console.log(eventTarget)
-                       console.log('Persisted in DOM')
                        let labelId = eventTarget.closest('.ui.popup').attr('linkedlabel');
                        $('#",ns("label"),"-'+labelId+' > .ui.label').html('');
                        eventTarget.parent().parent().find('.",
@@ -1090,7 +1091,6 @@ eventSearchbarServer <-
                        result = htmlToCondition('",
                              ns("filter-container"),
                              "');
-                       console.log(result);
                               //Set up data to shiny here
                        Shiny.setInputValue('",
                              ns('filter_tojson'),
@@ -1108,7 +1108,6 @@ eventSearchbarServer <-
                              ns("filter-container"),
                              "');
                        if(result !== null){
-                       console.log(result)
                                                      //Set up data to shiny here
                        Shiny.setInputValue('",
                              ns('filter_tojson'),

@@ -45,7 +45,8 @@ cohortExplorerServer <- function(id,
         renderUI({
           input$update_cohort_picker
           d_cohorts <-
-            dplyr::tbl(database(), in_schema("public", "d_cohorts"))
+            dplyr::tbl(database(), in_schema("public", "d_cohorts")) %>%
+            select(cohort_id, cohort_name)
           if (length(cohort_restriction()) == 0) {
             cohort_list <- d_cohorts %>% collect()
           } else {
@@ -213,7 +214,8 @@ cohortExplorerServer <- function(id,
           d_cohorts <-
             dplyr::tbl(database(), in_schema("public", "d_cohorts"))
           selected_cohort <-
-            d_cohorts %>% filter(cohort_id == !!input$cohort_picker) %>% collect()
+            d_cohorts %>% filter(cohort_id == !!input$cohort_picker) %>%
+            select(cohort_name, cohort_description) %>% collect()
           htmltools::tagAppendAttributes(div(
             selected_cohort$cohort_name,
             tags$small(selected_cohort$cohort_description)
@@ -254,8 +256,6 @@ cohortExplorerServer <- function(id,
       output$cohort_summary <- renderUI({
         req(input$cohort_picker)
         if (input$cohort_picker != -1) {
-          d_cohorts <-
-            dplyr::tbl(database(), in_schema("public", "d_cohorts"))
           cohort <-
             dplyr::tbl(database(), in_schema("public", "cohort"))
           patients <-
@@ -263,17 +263,9 @@ cohortExplorerServer <- function(id,
           admissions <-
             dplyr::tbl(database(), in_schema("mimiciv_hosp", "admissions"))
 
-          count_subject <-
-            cohort %>% filter(cohort_id == !!input$cohort_picker) %>% select(subject_id) %>% distinct() %>% count() %>% rename("Total subjects" = n) %>% collect()
-          count_hadm <-
-            cohort %>% filter(cohort_id == !!input$cohort_picker) %>% select(hadm_id) %>% distinct() %>% count() %>% rename("Total hadm" = n) %>% collect()
-          count_stay <-
-            cohort %>% filter(cohort_id == !!input$cohort_picker) %>% select(stay_id) %>% distinct() %>% count() %>% rename("Total stays" = n) %>% collect()
-          count_subject_with_one_icu <-
-            nrow(
-              cohort %>% filter(cohort_id == !!input$cohort_picker) %>% select(subject_id, stay_id) %>% group_by(subject_id) %>% count() %>% filter(n >
-                                                                                                                                                      0) %>% collect()
-            )
+          counts <- get_cohort_explorer_counts(database(), input$cohort_picker)
+          count_subject <- counts[["Total subjects"]]
+          count_subject_with_one_icu <- count_subject
 
           ratio_subject_with_one_icu = list("Subject with at least one ICU Stay" =
                                               paste0((count_subject_with_one_icu / count_subject) * 100,
@@ -298,9 +290,7 @@ cohortExplorerServer <- function(id,
 
           summary <-
             bind_cols(
-              count_subject,
-              count_hadm,
-              count_stay,
+              counts,
               ratio_subject_with_one_icu,
               sex_ratio,
               age_mean_median
@@ -355,12 +345,11 @@ cohortExplorerServer <- function(id,
 
       })
 
-      # Use patient explorer as a module to display information
-      observe({
-        patientExplorerInstance <- patientExplorerServer("cohort_patient_explorer",
-                                                         database,
-                                                         input$cohort_picker)
-      })
+      # Initialize the module once; its cohort selection remains reactive.
+      patientExplorerServer("cohort_patient_explorer", database, reactive({
+        input$update_cohort_picker
+        input$cohort_picker
+      }))
 
       allowed_target <- list(
         "inputevents" = c("amount", "rate"),
@@ -485,7 +474,7 @@ cohortExplorerServer <- function(id,
           itemid <- input$parameter_picker
 
           column_type <-
-            get_column_type(input$field_picker, schema, table)
+            get_column_type(input$field_picker, schema, table, database())
 
           if (column_type == "character varying" && input$force_cast) {
             field <- paste0(
@@ -548,8 +537,6 @@ cohortExplorerServer <- function(id,
                 input$cohort_picker
               )
           }
-
-          print(sql(query))
 
           setProgress(value = 3 / 5, message = "Requesting database")
           data <- dplyr::tbl(database(), sql(query)) %>% collect()
@@ -963,6 +950,9 @@ cohortExplorerServer <- function(id,
       apply_condition_object <- function(stay_to_filter,
                                          condition_object) {
 
+        if (!is.null(condition_object$condition_error)) {
+          return(list(status = "error", message = condition_object$condition_error))
+        }
         constraint_list <- condition_object$constraint_list
         table_count <- length(constraint_list)
         strat_data <- list()
@@ -1324,7 +1314,6 @@ cohortExplorerServer <- function(id,
             is_stratification_valid <- F
           }
           suppressWarnings({
-            print(transformed_data())
             if (input$plot_type == "Longitudinal trajectory") {
               labelx <- "Time in hour"
               strat_count <-
@@ -1470,10 +1459,7 @@ cohortExplorerServer <- function(id,
 
 
 
-      observe({
-        req(input$cohort_picker)
-        clinicalDataDescServer("clinical_data_desc", database, clinical_data_list)
-      })
+      clinicalDataDescServer("clinical_data_desc", database, clinical_data_list)
 
       output$export_data_csv <- downloadHandler(
         filename = function() {

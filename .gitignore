@@ -16,3 +16,4 @@ renv/.dockerignore
 .env
 .env.*
 !.env.example
+.Rproj.user

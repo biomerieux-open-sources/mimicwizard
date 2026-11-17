@@ -118,6 +118,54 @@ validate_cohort_config <- function(cfg) {
 #
 # Mirrors the transformation currently done inside
 # eventSearchbarServer's `condition_object <- reactive(...)`.
+validate_condition_chain <- function(chain_condition) {
+  if (length(chain_condition) == 0) return(NULL)
+  expecting_filter <- TRUE
+  depth <- 0L
+  last_operator <- NULL
+
+  for (row in chain_condition) {
+    if (!is.list(row) || is.null(row$type) || length(row$type) != 1L) {
+      return("The condition contains an unrecognized element.")
+    }
+    if (identical(row$type, "filter")) {
+      expecting_filter <- FALSE
+      last_operator <- NULL
+    } else if (identical(row$type, "condition")) {
+      if (is.null(row$element) || !row$element %in% c("AND", "OR")) {
+        return("The condition contains an unrecognized operator.")
+      }
+      if (expecting_filter) {
+        return(paste0("Add an event or parenthesized condition before ", row$element, "."))
+      }
+      expecting_filter <- TRUE
+      last_operator <- row$element
+    } else if (identical(row$type, "enclose") && identical(row$element, "open")) {
+      depth <- depth + 1L
+      expecting_filter <- TRUE
+      last_operator <- NULL
+    } else if (identical(row$type, "enclose") && identical(row$element, "close")) {
+      if (depth == 0L) return("There is a closing parenthesis without an opening parenthesis.")
+      if (expecting_filter) {
+        if (!is.null(last_operator)) {
+          return(paste0("Add an event or parenthesized condition after ", last_operator, "."))
+        }
+        return("Parentheses must contain at least one event condition.")
+      }
+      depth <- depth - 1L
+      expecting_filter <- FALSE
+    } else {
+      return("The condition contains an unrecognized element.")
+    }
+  }
+  if (!is.null(last_operator)) {
+    return(paste0("Add an event or parenthesized condition after ", last_operator, "."))
+  }
+  if (depth > 0L) return("There is an opening parenthesis without a closing parenthesis.")
+  if (expecting_filter) return("Add an event condition.")
+  NULL
+}
+
 chain_condition_to_condition_object <- function(chain_condition,
                                                 database,
                                                 icd_to_allow = NULL,

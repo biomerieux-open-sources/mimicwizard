@@ -1,3 +1,37 @@
+cohort_outcomes_refresh <- function(input) {
+  refresh <- reactiveVal(0L)
+  observeEvent(input$execute_stratification, {
+    if (!is.null(input$execute_stratification) && input$execute_stratification > 0) {
+      refresh(isolate(refresh()) + 1L)
+    }
+  }, ignoreNULL = TRUE)
+  refresh
+}
+
+bind_cohort_outcomes_events <- function(rendered, cohort_id, refresh) {
+  bindEvent(rendered, {
+    refresh()
+    cohort_id()
+  }, ignoreInit = FALSE, ignoreNULL = TRUE)
+}
+
+cohort_outcomes_spinner <- function(ui, namespace) {
+  shinycssloaders::withSpinner(ui, id = namespace("outcomes_spinner"))
+}
+
+cohort_outcomes_wide <- function(data) {
+  data %>%
+    dplyr::select(subject_id, hadm_id, stay_id, strat, label, value, valueuom) %>%
+    dplyr::arrange(subject_id, hadm_id, stay_id, strat, label, valueuom, value) %>%
+    dplyr::distinct(subject_id, hadm_id, stay_id, strat, label, valueuom, .keep_all = TRUE) %>%
+    tidyr::pivot_wider(
+      names_from = c("label", "valueuom"),
+      names_glue = "{label} ({valueuom})",
+      values_from = "value"
+    ) %>%
+    dplyr::select(-subject_id, -hadm_id, -stay_id)
+}
+
 cohortOutcomesExplorerServer <-
   function(id,
            database = NULL,
@@ -174,6 +208,9 @@ cohortOutcomesExplorerServer <-
       apply_condition_object <- function(stay_to_filter,
                                          condition_object) {
 
+        if (!is.null(condition_object$condition_error)) {
+          return(list(status = "error", message = condition_object$condition_error))
+        }
         constraint_list <- condition_object$constraint_list
         table_count <- length(constraint_list)
         strat_data <- list()
@@ -268,19 +305,13 @@ cohortOutcomesExplorerServer <-
 
       cohort_outcomes_export <- reactiveVal()
       cohort_icd_export <- reactiveVal()
+      refresh_outcomes <- cohort_outcomes_refresh(input)
       output$outcomes_result <- renderUI({
         if (isTruthy(cohort_id())) {
-          cohort <- dplyr::tbl(database(), in_schema("public", "cohort"))
-          d_cohorts <- dplyr::tbl(database(), in_schema("public", "d_cohorts"))
-          demographics <- dplyr::tbl(database(), in_schema("public", "demographics"))
-
-          stratified_data <- d_cohorts %>%
-            filter(cohort_id == !!cohort_id()) %>%
-            inner_join(cohort, by = "cohort_id") %>%
-            inner_join(demographics,
-                       by = c("subject_id", "hadm_id", "stay_id")) %>%
-            mutate(strat = "Whole Cohort") %>%
-            collect() %>%
+          outcomes_query <- cohort_outcome_query(database(), cohort_id())
+          outcome_data <- outcomes_query %>% collect() %>% mutate(strat = "Whole Cohort")
+          stratified_data <-
+            outcome_data %>%
             {
               if (isolate(strat_counter()) > 0) {
                 stratified_stay_df <- .
@@ -359,12 +390,7 @@ cohortOutcomesExplorerServer <-
 
             }
           if (inherits(stratified_data, "shiny.tag")) return(stratified_data)
-          wider_stratified <- stratified_data %>%
-            transmute(strat,label, value,valueuom) %>%
-            group_by(strat,label,valueuom) %>%
-            mutate(rn = row_number()) %>%
-            pivot_wider(names_from = c("label","valueuom"),names_glue= "{label} ({valueuom})", values_from = "value") %>%
-            select(-rn)
+          wider_stratified <- cohort_outcomes_wide(stratified_data)
 
           cols_to_convert <- names(wider_stratified)[sapply(wider_stratified, contains_number)]
 
@@ -374,16 +400,12 @@ cohortOutcomesExplorerServer <-
             mutate_at(cols_to_convert, as.numeric)
 
           names(wider_stratified) <- gsub(" \\(\\)", "", names(wider_stratified))
-
           strat_number <- isolate(strat_counter())
 
-          diagnoses_icd <- dplyr::tbl(database(), in_schema("mimiciv_hosp", "diagnoses_icd"))
-          d_icd_diagnoses <- dplyr::tbl(database(), in_schema("mimiciv_hosp", "d_icd_diagnoses"))
-          icd_data <- stratified_data %>% select(subject_id,hadm_id,strat) %>% distinct() %>% {
-            inner_join(x=diagnoses_icd,y=.,by=c("subject_id","hadm_id"),copy=TRUE)
-          } %>%
-            filter(seq_num <= 5) %>% inner_join(d_icd_diagnoses,by=c("icd_version","icd_code")) %>%
-          count(icd_code,icd_version,long_title,strat,sort = TRUE) %>% collect()
+          icd_data <- get_cohort_icd_counts(
+            database(), if (strat_number > 0) stratified_data else
+              cohort_icd_admissions_query(database(), cohort_id())
+          )
           segment_color <- c("red","orange","yellow","olive","green","blue")
           cohort_outcomes_export(wider_stratified)
           cohort_icd_export(icd_data)
@@ -422,11 +444,38 @@ cohortOutcomesExplorerServer <-
                 } else{
                   .
                 }
-              } %>%
-              bold_labels() %>%
-              as_gt()
+              }
 
-          withSpinner(tagList(HTML(gt::as_raw_html(gt_table)), div(tagList(
+          count_rows <- tibble::tibble(
+            variable = c("subject_id", "hadm_id"),
+            var_type = "continuous",
+            row_type = "label",
+            var_label = c("Number of subjects", "Number of hospital admissions"),
+            label = var_label,
+            n = as.character(c(
+              n_distinct(stratified_data$subject_id, na.rm = TRUE),
+              n_distinct(stratified_data$hadm_id, na.rm = TRUE)
+            ))
+          )
+          stat_columns <- grep("^stat_[0-9]+$", names(gt_table$table_body), value = TRUE)
+          for (stat_column in stat_columns) {
+            population <- stratified_data
+            if (strat_number > 0) {
+              strat_label <- gt_table$table_styling$header$modify_stat_level[
+                gt_table$table_styling$header$column == stat_column
+              ]
+              population <- population %>% filter(strat == !!strat_label)
+            }
+            count_rows[[stat_column]] <- as.character(c(
+              n_distinct(population$subject_id, na.rm = TRUE),
+              n_distinct(population$hadm_id, na.rm = TRUE)
+            ))
+          }
+          gt_table <- gt_table %>%
+            gtsummary::modify_table_body(~ dplyr::bind_rows(count_rows, .x)) %>%
+            bold_labels() %>%
+            as_gt()
+          cohort_outcomes_spinner(tagList(HTML(gt::as_raw_html(gt_table)), div(tagList(
             lapply(c(
               "strat",
               "age (y.o.)",
@@ -515,15 +564,13 @@ cohortOutcomesExplorerServer <-
               ,class="blue",style="height:350px;")
               ,class = "four wide column")
             }
-            , class = "ui grid"),div(tags$i("ICD Code are taken from the 5 main ICD for each patient (seq_num <= 5)"),class="my-10")))
+            , class = "ui grid"),div(tags$i("ICD Code are taken from the 5 main ICD for each patient (seq_num <= 5)"),class="my-10")),
+            namespace = ns)
           #cols_add(plot=list(,renderPlot(DescTools::Desc(cohort_data$gender)),"","","weight","height","BMI","Charlson Score at hospital admission","Simplified Acute Physiology Score (SAPSII)","Sequential Organ Failure Assessment score (SOFA)","Length of ICU Stay (LIS)","Length of Hospital Stay (LHS)"))
 
         }
 
-      }) %>% bindEvent({
-        input$execute_stratification
-        cohort_id()
-      }, ignoreInit = FALSE, ignoreNULL = TRUE)
+      }) %>% bind_cohort_outcomes_events(cohort_id, refresh_outcomes)
 
       output$download_buttons <- renderUI({
         if(isTruthy(cohort_id())){
